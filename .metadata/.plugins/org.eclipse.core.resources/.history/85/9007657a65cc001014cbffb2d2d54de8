@@ -1,0 +1,25 @@
+import javafx.application.Application;
+import javafx.scene.Scene;
+import javafx.scene.control.TableView;
+import javafx.scene.layout.VBox;
+import javafx.stage.Stage;
+
+public class MainGUI extends Application {
+
+    @Override
+    public void start(Stage stage) {
+        TableView rsTable = new TableView();
+        TableView robTable = new TableView();
+
+        VBox root = new VBox(rsTable, robTable);
+        Scene scene = new Scene(root, 800, 600);
+
+        stage.setTitle("Tomasulo Simulator");
+        stage.setScene(scene);
+        stage.show();
+    }
+
+    public static void main(String[] args) {
+        launch(args);
+    }
+}

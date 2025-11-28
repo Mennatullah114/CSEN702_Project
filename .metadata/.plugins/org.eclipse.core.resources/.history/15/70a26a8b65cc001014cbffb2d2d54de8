@@ -1,0 +1,49 @@
+import java.util.*;
+
+public class TomasuloSimulator {
+
+    private List<Instruction> instructionQueue = new ArrayList<>();
+    private RegisterFile registers = new RegisterFile();
+    private ReorderBuffer rob = new ReorderBuffer();
+
+    private List<ReservationStation> fpAddStations = new ArrayList<>();
+    private List<ReservationStation> fpMulStations = new ArrayList<>();
+    private List<ReservationStation> loadBuffers = new ArrayList<>();
+
+    public TomasuloSimulator() {
+        // Initialize RS sizes (later make this user-configurable)
+        for (int i = 0; i < 3; i++) fpAddStations.add(new ReservationStation("Add" + i));
+        for (int i = 0; i < 2; i++) fpMulStations.add(new ReservationStation("Mul" + i));
+        for (int i = 0; i < 3; i++) loadBuffers.add(new ReservationStation("Load" + i));
+    }
+
+    public void loadInstructions(List<Instruction> instr) {
+        instructionQueue.addAll(instr);
+    }
+
+    public void step() {
+        issue();
+        execute();
+        writeBack();
+    }
+
+    private void issue() {
+        if (instructionQueue.isEmpty()) return;
+
+        Instruction inst = instructionQueue.get(0);
+
+        // TODO: Find appropriate RS depending on instruction type
+        // TODO: Allocate ROB entry
+        // TODO: Fill RS fields (op, Vj/Vk, Qj/Qk)
+
+        instructionQueue.remove(0);
+    }
+
+    private void execute() {
+        // TODO: Decrement latency, start execution, handle loads, branches, etc.
+    }
+
+    private void writeBack() {
+        // TODO: Broadcast on CDB, update ROB, update RS waiting values, commit
+    }
+}

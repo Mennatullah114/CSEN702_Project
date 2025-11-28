@@ -1,0 +1,66 @@
+import java.util.*;
+
+public class TomasuloSimulator {
+
+    public List<Instruction> instructionQueue = new ArrayList<>();
+    public RegisterFile registers;
+    public ReorderBuffer rob;
+    public List<ReservationStation> fpAddStations;
+    public List<ReservationStation> fpMulStations;
+    public List<ReservationStation> loadBuffers;
+
+    public TomasuloSimulator() {
+        // Initialize RS sizes (later make this user-configurable)
+    	   registers = new RegisterFile();
+           rob = new ReorderBuffer();
+
+           fpAddStations = new ArrayList<>();
+           fpMulStations = new ArrayList<>();
+           loadBuffers = new ArrayList<>();
+        for (int i = 0; i < 3; i++) fpAddStations.add(new ReservationStation("Add" + i));
+        for (int i = 0; i < 2; i++) fpMulStations.add(new ReservationStation("Mul" + i));
+        for (int i = 0; i < 3; i++) loadBuffers.add(new ReservationStation("Load" + i));
+    }
+
+    public void loadInstructions(List<Instruction> instr) {
+        instructionQueue.addAll(instr);
+    }
+
+    public void step() {
+        issue();
+        execute();
+        writeBack();
+    }
+
+    private void issue() {
+        if (instructionQueue.isEmpty()) return;
+
+        Instruction inst = instructionQueue.get(0);
+
+        // TODO: Find appropriate RS depending on instruction type
+        // TODO: Allocate ROB entry
+        // TODO: Fill RS fields (op, Vj/Vk, Qj/Qk)
+
+        instructionQueue.remove(0);
+    }
+
+    private void execute() {
+        // TODO: Decrement latency, start execution, handle loads, branches, etc.
+    }
+
+    private void writeBack() {
+        // TODO: Broadcast on CDB, update ROB, update RS waiting values, commit
+    }
+    
+    public List<ReservationStation> getAllStations() {
+        List<ReservationStation> all = new ArrayList<>();
+        all.addAll(fpAddStations);
+        all.addAll(fpMulStations);
+        all.addAll(loadBuffers);
+        return all;
+    }
+    public void loadProgram(List<Instruction> instructions) {
+        instructionQueue.clear();
+        instructionQueue.addAll(instructions);
+    }
+}

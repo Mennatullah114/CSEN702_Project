@@ -1,0 +1,95 @@
+import java.util.*;
+
+public class InstructionParser {
+
+    public static List<Instruction> parse(String text) {
+        List<Instruction> list = new ArrayList<>();
+
+        String[] lines = text.split("\n");
+
+        for (String line : lines) {
+            line = line.trim();
+            if (line.isEmpty()) continue;
+
+            list.add(parseLine(line));
+        }
+
+        return list;
+    }
+
+
+    private static Instruction parseLine(String line) {
+
+        line = line.replace(",", "");
+
+        String[] parts = line.split(" ");
+
+        String op = parts[0].toUpperCase();
+
+        switch (op) {
+
+            case "ADD.D":
+                return new Instruction(
+                        Instruction.OpCode.ADD_D,
+                        parts[1], parts[2], parts[3], 0);
+
+            case "SUB.D":
+                return new Instruction(
+                        Instruction.OpCode.SUB_D,
+                        parts[1], parts[2], parts[3], 0);
+
+            case "MUL.D":
+                return new Instruction(
+                        Instruction.OpCode.MUL_D,
+                        parts[1], parts[2], parts[3], 0);
+
+            case "DIV.D":
+                return new Instruction(
+                        Instruction.OpCode.DIV_D,
+                        parts[1], parts[2], parts[3], 0);
+
+            case "LW": {
+                // LW R1, 8(R2)
+                String rd = parts[1];
+                String offset = parts[2];
+
+                int imm = Integer.parseInt(offset.substring(0, offset.indexOf("(")));
+                String rs = offset.substring(offset.indexOf("(")+1, offset.indexOf(")"));
+
+                return new Instruction(Instruction.OpCode.LW, rd, rs, null, imm);
+            }
+
+            case "SW": {
+                // SW R1, 8(R2)
+                String rs2 = parts[1];
+                String offset = parts[2];
+
+                int imm = Integer.parseInt(offset.substring(0, offset.indexOf("(")));
+                String rs1 = offset.substring(offset.indexOf("(")+1, offset.indexOf(")"));
+
+                return new Instruction(Instruction.OpCode.SW, rs2, rs1, null, imm);
+            }
+
+            case "DADDI":
+                return new Instruction(
+                        Instruction.OpCode.DADDI,
+                        parts[1], parts[2], null,
+                        Integer.parseInt(parts[3]));
+
+            case "DSUBI":
+                return new Instruction(
+                        Instruction.OpCode.DSUBI,
+                        parts[1], parts[2], null,
+                        Integer.parseInt(parts[3]));
+
+            case "BNE":
+            case "BEQ":
+                return new Instruction(
+                        op.equals("BNE") ? Instruction.OpCode.BNE : Instruction.OpCode.BEQ,
+                        null, parts[1], parts[2],
+                        Integer.parseInt(parts[3]));
+        }
+
+        throw new RuntimeException("Unknown instruction: " + line);
+    }
+}

@@ -1,0 +1,128 @@
+import java.util.*;
+
+public class TomasuloSimulator {
+
+    public List<Instruction> instructionQueue = new ArrayList<>();
+    public RegisterFile registers;
+    public ReorderBuffer rob;
+    public List<ReservationStation> fpAddStations;
+    public List<ReservationStation> fpMulStations;
+    public List<ReservationStation> loadBuffers;
+
+    public TomasuloSimulator() {
+        // Initialize RS sizes (later make this user-configurable)
+    	   registers = new RegisterFile();
+           rob = new ReorderBuffer();
+
+           fpAddStations = new ArrayList<>();
+           fpMulStations = new ArrayList<>();
+           loadBuffers = new ArrayList<>();
+        for (int i = 0; i < 3; i++) fpAddStations.add(new ReservationStation("Add" + i));
+        for (int i = 0; i < 2; i++) fpMulStations.add(new ReservationStation("Mul" + i));
+        for (int i = 0; i < 3; i++) loadBuffers.add(new ReservationStation("Load" + i));
+    }
+
+    public void loadInstructions(List<Instruction> instr) {
+        instructionQueue.addAll(instr);
+    }
+
+    public void step() {
+        issue();
+        execute();
+        writeBack();
+    }
+
+    private void issue() {
+        if (instructionQueue.isEmpty()) return;
+
+        Instruction inst = instructionQueue.get(0);
+        ReservationStation rs = null;
+
+        String op = inst.opcode;
+
+        if (op.equals("DADDI") || op.equals("DSUBI") || op.equals("BEQ") || op.equals("BNE")) {
+            rs = findFreeStation(intStations);
+        } else if (op.equals("ADD.D") || op.equals("SUB.D") || op.equals("ADD.S") || op.equals("SUB.S")) {
+            rs = findFreeStation(fpAddStations);
+        } else if (op.equals("MUL.D") || op.equals("DIV.D") || op.equals("MUL.S") || op.equals("DIV.S")) {
+            rs = findFreeStation(fpMulStations);
+        } else if (op.equals("L.D") || op.equals("L.S") || op.equals("LD") || op.equals("LW")) {
+            rs = findFreeStation(loadBuffers);
+        } else if (op.equals("S.D") || op.equals("S.S") || op.equals("SD") || op.equals("SW")) {
+            rs = findFreeStation(storeBuffers);
+        }
+
+        if (rs == null || rob.isFull()) {
+            System.out.println("Stall: No free RS or ROB full for " + inst);
+            return; // Structural hazard
+        }
+
+        // Allocate ROB entry
+        ROBEntry robEntry = rob.addEntry(inst, pc);
+        inst.robDest = robEntry;
+
+        // Fill RS
+        rs.busy = true;
+        rs.op = op;
+        rs.dest = robEntry;
+
+        if (inst.hasDest()) {
+            registers.setTag(inst.rd, robEntry); // Rename destination
+        }
+
+        if (inst.rs != null) {
+            RegisterStatus reg = registers.getStatus(inst.rs);
+            if (reg.reorder != null) {
+                rs.qj = reg.reorder;
+            } else {
+                rs.vj = reg.value;
+                rs.qj = null;
+            }
+        }
+
+        if (inst.rt != null && !op.startsWith("S.")) { // Stores don't need Vk
+            RegisterStatus reg = registers.getStatus(inst.rt);
+            if (reg.reorder != null) {
+                rs.qk = reg.reorder;
+            } else {
+                rs.vk = reg.value;
+                rs.qk = null;
+            }
+        }
+
+        if (op.equals("L.D") || op.equals("L.S") || op.equals("LD") || op.equals("LW")) {
+            rs.address = inst.imm + registers.getValue(inst.rs); // Effective address
+        }
+
+        if (op.equals("BEQ") || op.equals("BNE")) {
+            rs.targetPC = inst.targetLabel != null ? getLabelAddress(inst.targetLabel) : pc + inst.imm;
+        }
+
+        instructionQueue.remove(0);
+        pc++;
+        System.out.println("Issued: " + inst + " -> " + rs.name);
+    }
+
+    private void execute() {
+        // TODO: Decrement latency, start execution, handle loads, branches, etc.
+    }
+
+    private void writeBack() {
+        // TODO: Broadcast on CDB, update ROB, update RS waiting values, commit
+    }
+    private ReservationStation findFreeStation(List<ReservationStation> list) {
+        for (var rs : list) if (!rs.busy) return rs;
+        return null;
+    }
+    public List<ReservationStation> getAllStations() {
+        List<ReservationStation> all = new ArrayList<>();
+        all.addAll(fpAddStations);
+        all.addAll(fpMulStations);
+        all.addAll(loadBuffers);
+        return all;
+    }
+    public void loadProgram(List<Instruction> instructions) {
+        instructionQueue.clear();
+        instructionQueue.addAll(instructions);
+    }
+}

@@ -1,0 +1,27 @@
+public class ReservationStation {
+    public String name;
+    public boolean busy;
+
+    public String op;
+    public String Vj, Vk;
+    public String Qj, Qk;
+
+    public int latencyRemaining;
+    public String resultTag;
+    public double resultValue;
+    public boolean readyToBroadcast = false;
+    public int immediate; // for DADDI/DSUBI/load/store
+    public ReservationStation(String name) {
+        this.name = name;
+        this.busy = false;
+    }
+
+    public void clear() {
+        busy = false;
+        op = null;
+        Vj = Vk = null;
+        Qj = Qk = null;
+        latencyRemaining = 0;
+        resultTag = null;
+    }
+}

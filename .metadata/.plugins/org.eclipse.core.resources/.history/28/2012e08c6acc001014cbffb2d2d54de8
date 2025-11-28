@@ -1,0 +1,34 @@
+import java.util.LinkedList;
+
+public class ReorderBuffer {
+    public static class ROBEntry {
+        public boolean busy;
+        public String dest;
+        public int value;
+        public boolean ready;
+
+        public ROBEntry(String dest) {
+            this.dest = dest;
+            this.busy = true;
+        }
+    }
+
+    public LinkedList<ROBEntry> queue = new LinkedList<>();
+
+    public int add(String dest) {
+        queue.add(new ROBEntry(dest));
+        return queue.size() - 1;
+    }
+
+    public ROBEntry peek() {
+        return queue.peekFirst();
+    }
+
+    public ROBEntry popIfReady() {
+        ROBEntry e = queue.peekFirst();
+        if (e != null && e.ready) {
+            return queue.removeFirst();
+        }
+        return null;
+    }
+}
