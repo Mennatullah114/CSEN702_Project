@@ -1,23 +1,51 @@
 public class Instruction {
 
-    public enum OpCode {
-    	   DADDI, DSUBI,
+	public enum OpCode {
 
-    	    // Floating and double ops
-    	    ADD_D, ADD_S,
-    	    SUB_D, SUB_S,
-    	    MUL_D, MUL_S,
-    	    DIV_D, DIV_S,
+	    // Integer ops
+	    DADDI("DADDI"),
+	    DSUBI("DSUBI"),
 
-    	    // Loads (integer + FP)
-    	    LW, LD, L_S, L_D,
+	    // Floating-point add/sub
+	    ADD_D("ADD.D"),
+	    ADD_S("ADD.S"),
+	    SUB_D("SUB.D"),
+	    SUB_S("SUB.S"),
 
-    	    // Stores (integer + FP)
-    	    SW, SD, S_S, S_D,
+	    // Floating-point multiply/divide
+	    MUL_D("MUL.D"),
+	    MUL_S("MUL.S"),
+	    DIV_D("DIV.D"),
+	    DIV_S("DIV.S"),
 
-    	    // Branches
-    	    BNE, BEQ
-    }
+	    // Loads
+	    LW("LW"),
+	    LD("LD"),
+	    L_S("L.S"),
+	    L_D("L.D"),
+
+	    // Stores
+	    SW("SW"),
+	    SD("SD"),
+	    S_S("S.S"),
+	    S_D("S.D"),
+
+	    // Branches
+	    BEQ("BEQ"),
+	    BNE("BNE");
+
+	    public final String text;
+
+	    OpCode(String t) {
+	        text = t;
+	    }
+
+	    @Override
+	    public String toString() {
+	        return text;
+	    }
+	}
+
 
     public OpCode op;
     public String dest;
