@@ -33,7 +33,20 @@ public class MainGUI extends Application {
         sim = new TomasuloSimulator(config);
         
         // Set up cache miss listener
-        sim.setCacheMissListener(address -> showCacheMissAlert(address));
+        sim.setCacheMissListener(new TomasuloSimulator.CacheMissListener() {
+            @Override
+            public void onCacheMiss(int address) {
+                showCacheMissAlert(address);
+            }
+        });
+        
+        // Set up address clash listener
+        sim.setAddressClashListener(new TomasuloSimulator.AddressClashListener() {
+            @Override
+            public void onAddressClash(String stationName, int address, String reason) {
+                showAddressClashAlert(stationName, address, reason);
+            }
+        });
         
         // Show configuration dialog first
         showConfigDialog(true);
@@ -53,7 +66,21 @@ public class MainGUI extends Application {
                 // Reconfigure - recreate simulator
                 String currentProgram = programInput.getText();
                 sim = new TomasuloSimulator(config);
-                sim.setCacheMissListener(address -> showCacheMissAlert(address));
+                
+                sim.setCacheMissListener(new TomasuloSimulator.CacheMissListener() {
+                    @Override
+                    public void onCacheMiss(int address) {
+                        showCacheMissAlert(address);
+                    }
+                });
+                
+                sim.setAddressClashListener(new TomasuloSimulator.AddressClashListener() {
+                    @Override
+                    public void onAddressClash(String stationName, int address, String reason) {
+                        showAddressClashAlert(stationName, address, reason);
+                    }
+                });
+                
                 reinitTables();
                 if (!currentProgram.isEmpty()) {
                     // Reload program if there was one
@@ -116,7 +143,21 @@ public class MainGUI extends Application {
         Button resetBtn = new Button("Reset");
         resetBtn.setOnAction(e -> {
             sim = new TomasuloSimulator(config);
-            sim.setCacheMissListener(address -> showCacheMissAlert(address));
+            
+            sim.setCacheMissListener(new TomasuloSimulator.CacheMissListener() {
+                @Override
+                public void onCacheMiss(int address) {
+                    showCacheMissAlert(address);
+                }
+            });
+            
+            sim.setAddressClashListener(new TomasuloSimulator.AddressClashListener() {
+                @Override
+                public void onAddressClash(String stationName, int address, String reason) {
+                    showAddressClashAlert(stationName, address, reason);
+                }
+            });
+            
             reinitTables();
             refreshTables();
         });
@@ -304,7 +345,7 @@ public class MainGUI extends Application {
     private void showCacheMissAlert(int address) {
         Stage alertStage = new Stage();
         alertStage.setTitle("Cache Miss");
-        alertStage.initModality(Modality.APPLICATION_MODAL);  // Changed to modal - must press OK
+        alertStage.initModality(Modality.APPLICATION_MODAL);
         alertStage.initOwner(primaryStage);
         
         VBox alertBox = new VBox(15);
@@ -324,7 +365,33 @@ public class MainGUI extends Application {
         alertBox.getChildren().addAll(titleLabel, messageLabel, okBtn);
         
         alertStage.setScene(new Scene(alertBox, 320, 150));
-        alertStage.showAndWait();  // Changed to showAndWait - blocks until closed
+        alertStage.showAndWait();
+    }
+    
+    private void showAddressClashAlert(String stationName, int address, String reason) {
+        Stage alertStage = new Stage();
+        alertStage.setTitle("Address Clash");
+        alertStage.initModality(Modality.APPLICATION_MODAL);
+        alertStage.initOwner(primaryStage);
+        
+        VBox alertBox = new VBox(15);
+        alertBox.setPadding(new Insets(20));
+        alertBox.setStyle("-fx-alignment: center; -fx-background-color: #f8d7da; -fx-border-color: #dc3545; -fx-border-width: 2;");
+        
+        Label titleLabel = new Label("🔒 Address Clash Detected");
+        titleLabel.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #721c24;");
+        
+        Label messageLabel = new Label(String.format("Station: %s\nAddress: %d\n%s", stationName, address, reason));
+        messageLabel.setStyle("-fx-font-size: 14px; -fx-text-fill: #721c24;");
+        
+        Button okBtn = new Button("OK");
+        okBtn.setPrefWidth(80);
+        okBtn.setOnAction(ev -> alertStage.close());
+        
+        alertBox.getChildren().addAll(titleLabel, messageLabel, okBtn);
+        
+        alertStage.setScene(new Scene(alertBox, 380, 180));
+        alertStage.showAndWait();
     }
 
     /** TABLE DEFINITIONS **/

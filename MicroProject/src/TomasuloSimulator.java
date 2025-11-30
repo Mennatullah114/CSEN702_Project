@@ -22,8 +22,12 @@ public class TomasuloSimulator {
     public interface CacheMissListener {
         void onCacheMiss(int address);
     }
+    public interface AddressClashListener{
+    	void onAddressClash(String stationName, int address, String reason);
+    }
+    
     private CacheMissListener cacheMissListener;
-
+    private AddressClashListener addressClashListener ;
     public TomasuloSimulator(SimulatorConfig config) {
         this.config = config;
         registers = new RegisterFile();
@@ -55,7 +59,9 @@ public class TomasuloSimulator {
     public void setCacheMissListener(CacheMissListener listener) {
         this.cacheMissListener = listener;
     }
-
+    public void setAddressClashListener (AddressClashListener listener){
+    	this.addressClashListener = listener ;
+    }
     public void step() {
         commit();
         writeBack();
@@ -144,8 +150,28 @@ public class TomasuloSimulator {
 
             if (rs.op != null && isLoadOpString(rs.op)) {
                 if (!readyJ) continue;
+                
+                // Address clash check for loads: ensure no earlier stores to same address
+                if (!rs.startedExecution && rs.Qj == null) {
+                    int loadAddr = Integer.parseInt(rs.Vj == null ? "0" : rs.Vj) + 
+                                  Integer.parseInt(rs.Vk == null ? "0" : rs.Vk);
+                    if (hasAddressClash(rs, loadAddr)) {
+                        System.out.println(rs.name + " stalled due to address clash at " + loadAddr);
+                        continue;  // Stall this load
+                    }
+                }
             } else if (rs.op != null && isStoreOpString(rs.op)) {
                 if (!(readyJ && readyK)) continue;
+                
+                // Address clash check for stores: ensure no earlier loads/stores to same address
+                if (!rs.startedExecution) {
+                    int storeAddr = Integer.parseInt(rs.Vk == null ? "0" : rs.Vk) + 
+                                   (rs.effectiveAddress != null ? rs.effectiveAddress : 0);
+                    if (hasAddressClash(rs, storeAddr)) {
+                        System.out.println(rs.name + " stalled due to address clash at " + storeAddr);
+                        continue;  // Stall this store
+                    }
+                }
             } else {
                 if (!readyJ || !readyK) continue;
             }
@@ -449,5 +475,31 @@ public class TomasuloSimulator {
         if (op.equals("DADDI") || op.equals("DSUBI")) return config.intAluLatency;
         if (op.startsWith("B")) return config.branchLatency;
         return 1;
+    }
+    
+    // Check for address clashes between memory operations
+    private boolean hasAddressClash(ReservationStation current, int currentAddr) {
+        // Check all earlier instructions in ROB (those with lower ROB index)
+        for (int i = 0; i < current.robIndex; i++) {
+            if (i >= rob.queue.size()) break;
+            
+            ReorderBuffer.ROBEntry earlier = rob.queue.get(i);
+            if (!earlier.ready) {
+                // Find the RS for this earlier instruction
+                for (ReservationStation rs : getAllStations()) {
+                    if (rs.busy && rs.robIndex == i) {
+                        // Check if it's a memory operation with computed address
+                        if (isLoadOpString(rs.op) || isStoreOpString(rs.op)) {
+                            if (rs.effectiveAddress != null && rs.effectiveAddress == currentAddr) {
+                                // Address clash detected
+                                return true;
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        return false;
     }
 }
