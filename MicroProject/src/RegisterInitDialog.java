@@ -37,7 +37,9 @@ public class RegisterInitDialog {
         int row = 1;
         for (String reg : commonRegs) {
             Label label = new Label(reg + ":");
-            TextField field = new TextField("0");
+            // Set default value based on register type
+            String defaultValue = reg.startsWith("F") ? "0.0" : "0";
+            TextField field = new TextField(defaultValue);
             field.setPrefWidth(80);
             fields.put(reg, field);
             
@@ -94,7 +96,11 @@ public class RegisterInitDialog {
                         int intValue = Integer.parseInt(text);
                         reg.value = intValue;
                     } else if (regName.startsWith("F")) {
-                        // Floating point register - accept floating point
+                        // Floating point register - MUST contain a decimal point
+                        if (!text.contains(".")) {
+                            showError("Floating point registers (F) must contain a decimal point.\nExample: use '5.0' instead of '5'");
+                            return false;
+                        }
                         double fpValue = Double.parseDouble(text);
                         reg.value = fpValue;
                     }
@@ -102,7 +108,7 @@ public class RegisterInitDialog {
             }
             return true;
         } catch (NumberFormatException e) {
-            showError("Please enter valid numbers:\n- Integer registers (R): whole numbers only\n- Floating point registers (F): decimal numbers allowed");
+            showError("Please enter valid numbers:\n- Integer registers (R): whole numbers only (e.g., 5, 24)\n- Floating point registers (F): must include decimal point (e.g., 5.0, 3.14)");
             return false;
         }
     }

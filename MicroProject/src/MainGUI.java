@@ -1,10 +1,12 @@
 import java.util.*;
+
 import javafx.application.Application;
 import javafx.collections.*;
 import javafx.geometry.Insets;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
+import javafx.stage.Modality;
 import javafx.stage.Stage;
 
 public class MainGUI extends Application {
@@ -22,12 +24,16 @@ public class MainGUI extends Application {
     
     private Stage primaryStage;
     private TextArea programInput;
+    private TextArea cacheDisplay;
 
     @Override
     public void start(Stage stage) {
         this.primaryStage = stage;
         config = new SimulatorConfig();
         sim = new TomasuloSimulator(config);
+        
+        // Set up cache miss listener
+        sim.setCacheMissListener(address -> showCacheMissAlert(address));
         
         // Show configuration dialog first
         showConfigDialog(true);
@@ -47,6 +53,7 @@ public class MainGUI extends Application {
                 // Reconfigure - recreate simulator
                 String currentProgram = programInput.getText();
                 sim = new TomasuloSimulator(config);
+                sim.setCacheMissListener(address -> showCacheMissAlert(address));
                 reinitTables();
                 if (!currentProgram.isEmpty()) {
                     // Reload program if there was one
@@ -70,6 +77,7 @@ public class MainGUI extends Application {
         Label lblLoadStore = new Label("Load / Store Buffers");
         Label lblROB = new Label("Reorder Buffer");
         Label lblRegs = new Label("Register File");
+        Label lblCache = new Label("Cache Status");
 
         TableView<GuiModels.RSRow> addSubTable = createRSTable(addSubData);
         TableView<GuiModels.RSRow> mulDivTable = createRSTable(mulDivData);
@@ -80,6 +88,11 @@ public class MainGUI extends Application {
         programInput = new TextArea();
         programInput.setPrefHeight(100);
         programInput.setPromptText("Enter assembly instructions here...");
+        
+        cacheDisplay = new TextArea();
+        cacheDisplay.setPrefHeight(100);
+        cacheDisplay.setEditable(false);
+        cacheDisplay.setStyle("-fx-font-family: monospace;");
         
         Button configBtn = new Button("Configuration");
         configBtn.setOnAction(e -> showConfigDialog(false));
@@ -103,6 +116,7 @@ public class MainGUI extends Application {
         Button resetBtn = new Button("Reset");
         resetBtn.setOnAction(e -> {
             sim = new TomasuloSimulator(config);
+            sim.setCacheMissListener(address -> showCacheMissAlert(address));
             reinitTables();
             refreshTables();
         });
@@ -122,12 +136,14 @@ public class MainGUI extends Application {
             lblROB,
             robTable,
             lblRegs,
-            regTable
+            regTable,
+            lblCache,
+            cacheDisplay
         );
 
         root.setPadding(new Insets(10));
 
-        Scene scene = new Scene(root, 1050, 1000);
+        Scene scene = new Scene(root, 1050, 900);
 
         primaryStage.setTitle("Tomasulo Simulator");
         primaryStage.setScene(scene);
@@ -151,7 +167,7 @@ public class MainGUI extends Application {
         loadStoreData.clear();
         regData.clear();
         
-        // RS � create a row for each station and separate by type
+        // RS – create a row for each station and separate by type
         for (ReservationStation rs : sim.fpAddStations) {
             GuiModels.RSRow row = new GuiModels.RSRow(rs);
             addSubData.add(row);
@@ -257,13 +273,65 @@ public class MainGUI extends Application {
                 r.tagProperty().set(reg.tag == null ? "-" : reg.tag);
             }
         }
+        
+        // Cache update
+        updateCacheDisplay();
+    }
+    
+    private void updateCacheDisplay() {
+        List<String> cacheStatus = sim.cache.getCacheStatus();
+        StringBuilder sb = new StringBuilder();
+        sb.append(String.format("Cache: %d bytes, Block: %d bytes, Blocks: %d\n", 
+                  sim.config.cacheSize, sim.config.blockSize, 
+                  sim.config.cacheSize / sim.config.blockSize));
+        sb.append("----------------------------------------\n");
+        
+        int validBlocks = 0;
+        for (String status : cacheStatus) {
+            if (status.contains("Valid")) {
+                sb.append(status).append("\n");
+                validBlocks++;
+            }
+        }
+        
+        if (validBlocks == 0) {
+            sb.append("(Cache is empty)\n");
+        }
+        
+        cacheDisplay.setText(sb.toString());
+    }
+    
+    private void showCacheMissAlert(int address) {
+        Stage alertStage = new Stage();
+        alertStage.setTitle("Cache Miss");
+        alertStage.initModality(Modality.APPLICATION_MODAL);  // Changed to modal - must press OK
+        alertStage.initOwner(primaryStage);
+        
+        VBox alertBox = new VBox(15);
+        alertBox.setPadding(new Insets(20));
+        alertBox.setStyle("-fx-alignment: center; -fx-background-color: #fff3cd; -fx-border-color: #ffc107; -fx-border-width: 2;");
+        
+        Label titleLabel = new Label("⚠ Cache Miss Detected");
+        titleLabel.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #856404;");
+        
+        Label messageLabel = new Label(String.format("Address: %d\nFetching block from memory...", address));
+        messageLabel.setStyle("-fx-font-size: 14px; -fx-text-fill: #856404;");
+        
+        Button okBtn = new Button("OK");
+        okBtn.setPrefWidth(80);
+        okBtn.setOnAction(ev -> alertStage.close());
+        
+        alertBox.getChildren().addAll(titleLabel, messageLabel, okBtn);
+        
+        alertStage.setScene(new Scene(alertBox, 320, 150));
+        alertStage.showAndWait();  // Changed to showAndWait - blocks until closed
     }
 
     /** TABLE DEFINITIONS **/
 
     private TableView<GuiModels.RSRow> createRSTable(ObservableList<GuiModels.RSRow> data) {
         TableView<GuiModels.RSRow> table = new TableView<>();
-        table.setPrefHeight(120);
+        table.setPrefHeight(100);
 
         table.getColumns().add(col("Name", "name", 85));
         table.getColumns().add(col("Busy", "busy", 65));
@@ -281,7 +349,7 @@ public class MainGUI extends Application {
 
     private TableView<GuiModels.ROBRow> createROBTable() {
         TableView<GuiModels.ROBRow> table = new TableView<>();
-        table.setPrefHeight(180);
+        table.setPrefHeight(120);
 
         table.getColumns().add(col("Entry", "entry", 100));
         table.getColumns().add(col("Dest", "dest", 100));
@@ -295,7 +363,7 @@ public class MainGUI extends Application {
 
     private TableView<GuiModels.RegRow> createRegisterTable() {
         TableView<GuiModels.RegRow> table = new TableView<>();
-        table.setPrefHeight(180);
+        table.setPrefHeight(120);
 
         table.getColumns().add(col("Register", "reg", 100));
         table.getColumns().add(col("Value", "value", 120));

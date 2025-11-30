@@ -17,6 +17,12 @@ public class TomasuloSimulator {
     
     // Track pending cache operations
     private Map<ReservationStation, Integer> cachePendingCycles = new HashMap<>();
+    
+    // Cache miss notification callback
+    public interface CacheMissListener {
+        void onCacheMiss(int address);
+    }
+    private CacheMissListener cacheMissListener;
 
     public TomasuloSimulator(SimulatorConfig config) {
         this.config = config;
@@ -44,6 +50,10 @@ public class TomasuloSimulator {
     public void loadProgram(List<Instruction> instructions) {
         instructionQueue.clear();
         instructionQueue.addAll(instructions);
+    }
+    
+    public void setCacheMissListener(CacheMissListener listener) {
+        this.cacheMissListener = listener;
     }
 
     public void step() {
@@ -179,6 +189,11 @@ public class TomasuloSimulator {
                     System.out.println(rs.name + " accessing address " + address + 
                                      " - " + (hit ? "HIT" : "MISS") + 
                                      " (latency=" + latency + ")");
+                    
+                    // Notify on cache miss
+                    if (!hit && cacheMissListener != null) {
+                        cacheMissListener.onCacheMiss(address);
+                    }
                     
                     if (latency > 0) {
                         cachePendingCycles.put(rs, latency);
