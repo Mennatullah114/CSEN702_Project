@@ -10,30 +10,82 @@ import javafx.stage.Stage;
 public class MainGUI extends Application {
 
     private TomasuloSimulator sim;
+    private SimulatorConfig config;
 
     // GUI data
     private ObservableList<GuiModels.RSRow> rsData = FXCollections.observableArrayList();
+    private ObservableList<GuiModels.RSRow> addSubData = FXCollections.observableArrayList();
+    private ObservableList<GuiModels.RSRow> mulDivData = FXCollections.observableArrayList();
+    private ObservableList<GuiModels.RSRow> loadStoreData = FXCollections.observableArrayList();
     private ObservableList<GuiModels.ROBRow> robData = FXCollections.observableArrayList();
     private ObservableList<GuiModels.RegRow> regData = FXCollections.observableArrayList();
+    
+    private Stage primaryStage;
+    private TextArea programInput;
 
     @Override
     public void start(Stage stage) {
-        sim = new TomasuloSimulator();
+        this.primaryStage = stage;
+        config = new SimulatorConfig();
+        sim = new TomasuloSimulator(config);
         
-        // CRITICAL: Initialize data BEFORE creating tables
+        // Show configuration dialog first
+        showConfigDialog(true);
+    }
+    
+    private void showConfigDialog(boolean isInitial) {
+        ConfigDialog dialog = new ConfigDialog(primaryStage, config);
+        boolean okClicked = dialog.showAndWait();
+        
+        if (okClicked) {
+            config = dialog.getConfig();
+            
+            if (isInitial) {
+                // First time - create the GUI
+                createGUI();
+            } else {
+                // Reconfigure - recreate simulator
+                String currentProgram = programInput.getText();
+                sim = new TomasuloSimulator(config);
+                reinitTables();
+                if (!currentProgram.isEmpty()) {
+                    // Reload program if there was one
+                    List<Instruction> prog = InstructionParser.parse(currentProgram);
+                    sim.loadProgram(prog);
+                }
+                refreshTables();
+            }
+        } else if (isInitial) {
+            // User cancelled on first dialog - use defaults and continue
+            createGUI();
+        }
+    }
+    
+    private void createGUI() {
+        // Initialize data BEFORE creating tables
         initTables();
         
-        Label lblRS = new Label("All Reservation Stations (Combined)");
+        Label lblAddSub = new Label("FP ADD / SUB Stations");
+        Label lblMulDiv = new Label("FP MUL / DIV Stations");
+        Label lblLoadStore = new Label("Load / Store Buffers");
         Label lblROB = new Label("Reorder Buffer");
         Label lblRegs = new Label("Register File");
 
-        TableView<GuiModels.RSRow> rsTable = createRSTable();
+        TableView<GuiModels.RSRow> addSubTable = createRSTable(addSubData);
+        TableView<GuiModels.RSRow> mulDivTable = createRSTable(mulDivData);
+        TableView<GuiModels.RSRow> loadStoreTable = createRSTable(loadStoreData);
         TableView<GuiModels.ROBRow> robTable = createROBTable();
         TableView<GuiModels.RegRow> regTable = createRegisterTable();
         
-        TextArea programInput = new TextArea();
-        programInput.setPrefHeight(150);
+        programInput = new TextArea();
+        programInput.setPrefHeight(100);
         programInput.setPromptText("Enter assembly instructions here...");
+        
+        Button configBtn = new Button("Configuration");
+        configBtn.setOnAction(e -> showConfigDialog(false));
+        
+        Button initRegBtn = new Button("Initialize Registers");
+        initRegBtn.setOnAction(e -> showRegisterInitDialog());
         
         Button loadProgramBtn = new Button("Load Program");
         loadProgramBtn.setOnAction(e -> {
@@ -47,36 +99,81 @@ public class MainGUI extends Application {
             sim.step();
             refreshTables();
         });
+        
+        Button resetBtn = new Button("Reset");
+        resetBtn.setOnAction(e -> {
+            sim = new TomasuloSimulator(config);
+            reinitTables();
+            refreshTables();
+        });
+        
+        HBox buttonBox = new HBox(10, configBtn, initRegBtn, loadProgramBtn, nextCycleBtn, resetBtn);
 
         VBox root = new VBox(
-            15,
+            10,
             programInput,
-            loadProgramBtn,
-            lblRS,
-            rsTable,
+            buttonBox,
+            lblAddSub,
+            addSubTable,
+            lblMulDiv,
+            mulDivTable,
+            lblLoadStore,
+            loadStoreTable,
             lblROB,
             robTable,
             lblRegs,
-            regTable,
-            nextCycleBtn
+            regTable
         );
 
         root.setPadding(new Insets(10));
 
-        Scene scene = new Scene(root, 900, 800);
+        Scene scene = new Scene(root, 1050, 1000);
 
-        stage.setTitle("Tomasulo Simulator");
-        stage.setScene(scene);
-        stage.show();
+        primaryStage.setTitle("Tomasulo Simulator");
+        primaryStage.setScene(scene);
+        primaryStage.show();
 
         refreshTables();
+    }
+    
+    private void showRegisterInitDialog() {
+        RegisterInitDialog dialog = new RegisterInitDialog(primaryStage, sim.registers);
+        if (dialog.showAndWait()) {
+            refreshTables();
+        }
     }
 
     /** INIT TABLE DATA **/
     private void initTables() {
-        // RS – create a row for each station
-        for (ReservationStation rs : sim.getAllStations()) {
-            rsData.add(new GuiModels.RSRow(rs));
+        rsData.clear();
+        addSubData.clear();
+        mulDivData.clear();
+        loadStoreData.clear();
+        regData.clear();
+        
+        // RS – create a row for each station and separate by type
+        for (ReservationStation rs : sim.fpAddStations) {
+            GuiModels.RSRow row = new GuiModels.RSRow(rs);
+            addSubData.add(row);
+            rsData.add(row);
+        }
+        
+        for (ReservationStation rs : sim.fpMulStations) {
+            GuiModels.RSRow row = new GuiModels.RSRow(rs);
+            mulDivData.add(row);
+            rsData.add(row);
+        }
+        
+        for (ReservationStation rs : sim.loadBuffers) {
+            GuiModels.RSRow row = new GuiModels.RSRow(rs);
+            loadStoreData.add(row);
+            rsData.add(row);
+        }
+        
+        for (ReservationStation rs : sim.intStations) {
+            GuiModels.RSRow row = new GuiModels.RSRow(rs);
+            loadStoreData.add(row);
+            rsData.add(row);
         }
 
         // Register file
@@ -85,11 +182,42 @@ public class MainGUI extends Application {
         for (int i = 0; i < 16; i++)
             regData.add(new GuiModels.RegRow("F" + i));
     }
+    
+    private void reinitTables() {
+        rsData.clear();
+        addSubData.clear();
+        mulDivData.clear();
+        loadStoreData.clear();
+        
+        for (ReservationStation rs : sim.fpAddStations) {
+            GuiModels.RSRow row = new GuiModels.RSRow(rs);
+            addSubData.add(row);
+            rsData.add(row);
+        }
+        
+        for (ReservationStation rs : sim.fpMulStations) {
+            GuiModels.RSRow row = new GuiModels.RSRow(rs);
+            mulDivData.add(row);
+            rsData.add(row);
+        }
+        
+        for (ReservationStation rs : sim.loadBuffers) {
+            GuiModels.RSRow row = new GuiModels.RSRow(rs);
+            loadStoreData.add(row);
+            rsData.add(row);
+        }
+        
+        for (ReservationStation rs : sim.intStations) {
+            GuiModels.RSRow row = new GuiModels.RSRow(rs);
+            loadStoreData.add(row);
+            rsData.add(row);
+        }
+    }
 
 
     /** UPDATE TABLES EACH CYCLE **/
     private void refreshTables() {
-        // RS update - USE PROPERTY METHODS NOW
+        // RS update
         for (GuiModels.RSRow row : rsData) {
             ReservationStation rs = row.rs;
             row.busyProperty().set(rs.busy ? "Yes" : "No");
@@ -101,7 +229,7 @@ public class MainGUI extends Application {
             row.latencyProperty().set(Integer.toString(rs.latencyRemaining));
         }
 
-        // ROB update - USE PROPERTY METHODS
+        // ROB update
         robData.clear();
         int idx = 0;
         for (ReorderBuffer.ROBEntry e : sim.rob.queue) {
@@ -112,11 +240,20 @@ public class MainGUI extends Application {
             robData.add(r);
         }
 
-        // Register file update - USE PROPERTY METHODS
+        // Register file update
         for (GuiModels.RegRow r : regData) {
             RegisterFile.Register reg = sim.registers.get(r.getReg());
             if (reg != null) {
-                r.valueProperty().set("" + reg.value);
+                // Format the value based on register type
+                String valueStr;
+                if (r.getReg().startsWith("F")) {
+                    // Floating point register - show with decimals
+                    valueStr = String.format("%.4f", reg.value);
+                } else {
+                    // Integer register - show as integer
+                    valueStr = String.format("%d", (int)reg.value);
+                }
+                r.valueProperty().set(valueStr);
                 r.tagProperty().set(reg.tag == null ? "-" : reg.tag);
             }
         }
@@ -124,31 +261,31 @@ public class MainGUI extends Application {
 
     /** TABLE DEFINITIONS **/
 
-    private TableView<GuiModels.RSRow> createRSTable() {
+    private TableView<GuiModels.RSRow> createRSTable(ObservableList<GuiModels.RSRow> data) {
         TableView<GuiModels.RSRow> table = new TableView<>();
-        table.setPrefHeight(200);
+        table.setPrefHeight(120);
 
-        table.getColumns().add(col("Name", "name", 90));
-        table.getColumns().add(col("Busy", "busy", 50));
-        table.getColumns().add(col("Op", "op", 80));
-        table.getColumns().add(col("Vj", "Vj", 80));
-        table.getColumns().add(col("Vk", "Vk", 80));
-        table.getColumns().add(col("Qj", "Qj", 80));
-        table.getColumns().add(col("Qk", "Qk", 80));
+        table.getColumns().add(col("Name", "name", 85));
+        table.getColumns().add(col("Busy", "busy", 65));
+        table.getColumns().add(col("Op", "op", 110));
+        table.getColumns().add(col("Vj", "Vj", 85));
+        table.getColumns().add(col("Vk", "Vk", 85));
+        table.getColumns().add(col("Qj", "Qj", 85));
+        table.getColumns().add(col("Qk", "Qk", 85));
         table.getColumns().add(col("Latency", "latency", 80));
         
-        table.setItems(rsData);
+        table.setItems(data);
 
         return table;
     }
 
     private TableView<GuiModels.ROBRow> createROBTable() {
         TableView<GuiModels.ROBRow> table = new TableView<>();
-        table.setPrefHeight(200);
+        table.setPrefHeight(180);
 
         table.getColumns().add(col("Entry", "entry", 100));
         table.getColumns().add(col("Dest", "dest", 100));
-        table.getColumns().add(col("Value", "value", 100));
+        table.getColumns().add(col("Value", "value", 120));
         table.getColumns().add(col("Ready", "ready", 80));
         
         table.setItems(robData);
@@ -158,11 +295,11 @@ public class MainGUI extends Application {
 
     private TableView<GuiModels.RegRow> createRegisterTable() {
         TableView<GuiModels.RegRow> table = new TableView<>();
-        table.setPrefHeight(200);
+        table.setPrefHeight(180);
 
         table.getColumns().add(col("Register", "reg", 100));
         table.getColumns().add(col("Value", "value", 120));
-        table.getColumns().add(col("Tag", "tag", 120));
+        table.getColumns().add(col("Tag", "tag", 100));
         
         table.setItems(regData);
 

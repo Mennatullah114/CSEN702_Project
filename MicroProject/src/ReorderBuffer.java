@@ -1,24 +1,26 @@
 import java.util.LinkedList;
 
 public class ReorderBuffer {
-    public static class ROBEntry {
-        public int id;
-        public boolean busy;
-        public String dest;   // destination register name (or "MEM" for stores)
-        public int value;
-        public boolean ready;
-        public boolean isStore;
-        public int storeAddress;
-        public int storeValue;
+	  public static class ROBEntry {
+	        public int id;
+	        public boolean busy;
+	        public String dest;   // destination register name (or "MEM" for stores)
+	        public int value;
+	        public double valueDouble;  // For floating point results
+	        public boolean ready;
+	        public boolean isStore;
+	        public int storeAddress;
+	        public int storeValue;
 
-        public ROBEntry(int id, String dest, boolean isStore) {
-            this.id = id;
-            this.dest = dest;
-            this.isStore = isStore;
-            this.busy = true;
-            this.ready = false;
-        }
-    }
+	        public ROBEntry(int id, String dest, boolean isStore) {
+	            this.id = id;
+	            this.dest = dest;
+	            this.isStore = isStore;
+	            this.busy = true;
+	            this.ready = false;
+	            this.valueDouble = 0.0;
+	        }
+	    }
 
     public LinkedList<ROBEntry> queue = new LinkedList<>();
 

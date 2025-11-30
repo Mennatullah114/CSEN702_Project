@@ -4,6 +4,9 @@ public class TomasuloSimulator {
 
     public RegisterFile registers;
     public ReorderBuffer rob;
+    public Cache cache;
+    public Memory memory;
+    public SimulatorConfig config;
 
     public List<ReservationStation> fpAddStations;
     public List<ReservationStation> fpMulStations;
@@ -11,24 +14,31 @@ public class TomasuloSimulator {
     public List<ReservationStation> intStations;
 
     public List<Instruction> instructionQueue = new ArrayList<>();
+    
+    // Track pending cache operations
+    private Map<ReservationStation, Integer> cachePendingCycles = new HashMap<>();
 
-    public Memory memory;
-
-    public TomasuloSimulator() {
+    public TomasuloSimulator(SimulatorConfig config) {
+        this.config = config;
         registers = new RegisterFile();
         rob = new ReorderBuffer();
+        memory = new Memory();
+        cache = new Cache(config.cacheSize, config.blockSize, memory);
 
         fpAddStations = new ArrayList<>();
         fpMulStations = new ArrayList<>();
         loadBuffers = new ArrayList<>();
         intStations = new ArrayList<>();
 
-        for (int i = 0; i < 3; i++) fpAddStations.add(new ReservationStation("Add" + i));
-        for (int i = 0; i < 2; i++) fpMulStations.add(new ReservationStation("Mul" + i));
-        for (int i = 0; i < 3; i++) loadBuffers.add(new ReservationStation("Load" + i));
-        for (int i = 0; i < 2; i++) intStations.add(new ReservationStation("Int" + i));
-
-        memory = new Memory();
+        // Create stations based on config
+        for (int i = 0; i < config.fpAddStations; i++) 
+            fpAddStations.add(new ReservationStation("Add" + i));
+        for (int i = 0; i < config.fpMulStations; i++) 
+            fpMulStations.add(new ReservationStation("Mul" + i));
+        for (int i = 0; i < config.loadBuffers; i++) 
+            loadBuffers.add(new ReservationStation("Load" + i));
+        for (int i = 0; i < config.intStations; i++) 
+            intStations.add(new ReservationStation("Int" + i));
     }
 
     public void loadProgram(List<Instruction> instructions) {
@@ -85,10 +95,8 @@ public class TomasuloSimulator {
                 break;
 
             case SW: case SD: case S_S: case S_D:
-                // Vj = data to store, Vk = base register
-                bindSourceToRS(rs, inst.dest, true);  // data
-                bindSourceToRS(rs, inst.src1, false); // base
-                // Store offset temporarily in effectiveAddress
+                bindSourceToRS(rs, inst.dest, true);
+                bindSourceToRS(rs, inst.src1, false);
                 rs.effectiveAddress = inst.immediate;
                 break;
 
@@ -117,6 +125,7 @@ public class TomasuloSimulator {
     // -------------------------
     private void execute() {
         List<ReservationStation> all = getAllStations();
+        
         for (ReservationStation rs : all) {
             if (!rs.busy) continue;
 
@@ -131,21 +140,60 @@ public class TomasuloSimulator {
                 if (!readyJ || !readyK) continue;
             }
 
-            if (rs.latencyRemaining == 0) {
-                rs.startedExecution = true;
-                rs.latencyRemaining = latencyForOp(rs.op);
-                
-                if (isLoadOpString(rs.op)) {
-                    int base = Integer.parseInt(rs.Vj == null ? "0" : rs.Vj);
-                    int offset = Integer.parseInt(rs.Vk == null ? "0" : rs.Vk);
-                    rs.effectiveAddress = base + offset;
-                } else if (isStoreOpString(rs.op)) {
-                    int base = Integer.parseInt(rs.Vk == null ? "0" : rs.Vk);
-                    int offset = (rs.effectiveAddress != null) ? rs.effectiveAddress : 0;
-                    rs.effectiveAddress = base + offset;
+            // Handle cache access for loads/stores
+            if (isLoadOpString(rs.op) || isStoreOpString(rs.op)) {
+                if (cachePendingCycles.containsKey(rs)) {
+                    // Cache operation in progress
+                    int remaining = cachePendingCycles.get(rs);
+                    if (remaining > 1) {
+                        cachePendingCycles.put(rs, remaining - 1);
+                        continue;
+                    } else {
+                        // Cache operation complete
+                        cachePendingCycles.remove(rs);
+                        rs.latencyRemaining = 0; // Ready for writeback
+                    }
+                } else if (rs.latencyRemaining == 0 && !rs.startedExecution) {
+                    // Start cache access
+                    rs.startedExecution = true;
+                    
+                    // Compute address
+                    int address = 0;
+                    if (isLoadOpString(rs.op)) {
+                        int base = Integer.parseInt(rs.Vj == null ? "0" : rs.Vj);
+                        int offset = Integer.parseInt(rs.Vk == null ? "0" : rs.Vk);
+                        address = base + offset;
+                        rs.effectiveAddress = address;
+                    } else {
+                        int base = Integer.parseInt(rs.Vk == null ? "0" : rs.Vk);
+                        int offset = (rs.effectiveAddress != null) ? rs.effectiveAddress : 0;
+                        address = base + offset;
+                        rs.effectiveAddress = address;
+                    }
+                    
+                    // Check cache and set latency
+                    boolean hit = cache.isHit(address);
+                    int latency = hit ? config.cacheHitLatency : 
+                                       (config.cacheHitLatency + config.cacheMissPenalty);
+                    
+                    System.out.println(rs.name + " accessing address " + address + 
+                                     " - " + (hit ? "HIT" : "MISS") + 
+                                     " (latency=" + latency + ")");
+                    
+                    if (latency > 0) {
+                        cachePendingCycles.put(rs, latency);
+                    } else {
+                        rs.latencyRemaining = 0;
+                    }
                 }
             } else {
-                rs.latencyRemaining = Math.max(0, rs.latencyRemaining - 1);
+                // Non-memory operations
+                if (rs.latencyRemaining == 0) {
+                    rs.startedExecution = true;
+                    rs.latencyRemaining = latencyForOp(rs.op);
+                } else {
+                    rs.latencyRemaining = Math.max(0, rs.latencyRemaining - 1);
+                }
             }
         }
     }
@@ -161,8 +209,12 @@ public class TomasuloSimulator {
             if (!rs.busy) continue;
             if (rs.latencyRemaining > 0) continue;
             if (!rs.startedExecution) continue;
+            if (cachePendingCycles.containsKey(rs)) continue;
             finished.add(rs);
         }
+
+        // Handle multiple writebacks: prioritize older instructions (lower ROB index)
+        finished.sort(Comparator.comparingInt(rs -> rs.robIndex));
 
         for (ReservationStation rs : finished) {
             int robId = rs.robIndex;
@@ -172,64 +224,74 @@ public class TomasuloSimulator {
             System.out.println("WriteBack from " + rs.name + " op=" + rs.op + " rob=ROB" + robId);
 
             int result = 0;
+            double resultDouble = 0.0;
+            boolean useDouble = false;
+            
             try {
                 switch (rs.op) {
                     case "ADD.D": case "ADD.S":
-                        result = Integer.parseInt(rs.Vj == null ? "0" : rs.Vj) + 
-                                Integer.parseInt(rs.Vk == null ? "0" : rs.Vk);
+                        resultDouble = Double.parseDouble(rs.Vj == null ? "0" : rs.Vj) + 
+                                      Double.parseDouble(rs.Vk == null ? "0" : rs.Vk);
+                        useDouble = true;
                         break;
                     case "SUB.D": case "SUB.S":
-                        result = Integer.parseInt(rs.Vj == null ? "0" : rs.Vj) - 
-                                Integer.parseInt(rs.Vk == null ? "0" : rs.Vk);
+                        resultDouble = Double.parseDouble(rs.Vj == null ? "0" : rs.Vj) - 
+                                      Double.parseDouble(rs.Vk == null ? "0" : rs.Vk);
+                        useDouble = true;
                         break;
                     case "MUL.D": case "MUL.S":
-                        result = Integer.parseInt(rs.Vj == null ? "0" : rs.Vj) * 
-                                Integer.parseInt(rs.Vk == null ? "0" : rs.Vk);
+                        resultDouble = Double.parseDouble(rs.Vj == null ? "0" : rs.Vj) * 
+                                      Double.parseDouble(rs.Vk == null ? "0" : rs.Vk);
+                        useDouble = true;
                         break;
                     case "DIV.D": case "DIV.S":
-                        int denom = Integer.parseInt(rs.Vk == null ? "1" : rs.Vk);
-                        result = denom == 0 ? 0 : 
-                                Integer.parseInt(rs.Vj == null ? "0" : rs.Vj) / denom;
+                        double denom = Double.parseDouble(rs.Vk == null ? "1" : rs.Vk);
+                        resultDouble = denom == 0 ? 0 : 
+                                      Double.parseDouble(rs.Vj == null ? "0" : rs.Vj) / denom;
+                        useDouble = true;
                         break;
                     case "DADDI":
-                        result = Integer.parseInt(rs.Vj == null ? "0" : rs.Vj) + 
-                                Integer.parseInt(rs.Vk == null ? "0" : rs.Vk);
+                        result = (int)Double.parseDouble(rs.Vj == null ? "0" : rs.Vj) + 
+                                (int)Double.parseDouble(rs.Vk == null ? "0" : rs.Vk);
                         break;
                     case "DSUBI":
-                        result = Integer.parseInt(rs.Vj == null ? "0" : rs.Vj) - 
-                                Integer.parseInt(rs.Vk == null ? "0" : rs.Vk);
+                        result = (int)Double.parseDouble(rs.Vj == null ? "0" : rs.Vj) - 
+                                (int)Double.parseDouble(rs.Vk == null ? "0" : rs.Vk);
                         break;
                     case "LW": case "LD": case "L.S": case "L.D":
-                        if (rs.effectiveAddress == null) {
-                            rs.effectiveAddress = Integer.parseInt(rs.Vj == null ? "0" : rs.Vj) + 
-                                                 Integer.parseInt(rs.Vk == null ? "0" : rs.Vk);
-                        }
-                        result = memory.loadWord(rs.effectiveAddress);
+                        result = cache.loadWord(rs.effectiveAddress);
                         break;
                     case "SW": case "SD": case "S.S": case "S.D":
                         entry.isStore = true;
                         entry.storeAddress = (rs.effectiveAddress != null) ? rs.effectiveAddress : 0;
-                        entry.storeValue = Integer.parseInt(rs.Vj == null ? "0" : rs.Vj);
+                        entry.storeValue = (int)Double.parseDouble(rs.Vj == null ? "0" : rs.Vj);
                         entry.ready = true;
                         result = entry.storeValue;
                         break;
                     case "BEQ":
-                        result = (Integer.parseInt(rs.Vj == null ? "0" : rs.Vj) == 
-                                 Integer.parseInt(rs.Vk == null ? "0" : rs.Vk)) ? 1 : 0;
+                        result = (Double.parseDouble(rs.Vj == null ? "0" : rs.Vj) == 
+                                 Double.parseDouble(rs.Vk == null ? "0" : rs.Vk)) ? 1 : 0;
                         break;
                     case "BNE":
-                        result = (Integer.parseInt(rs.Vj == null ? "0" : rs.Vj) != 
-                                 Integer.parseInt(rs.Vk == null ? "0" : rs.Vk)) ? 1 : 0;
+                        result = (Double.parseDouble(rs.Vj == null ? "0" : rs.Vj) != 
+                                 Double.parseDouble(rs.Vk == null ? "0" : rs.Vk)) ? 1 : 0;
                         break;
                     default:
                         result = 0;
                 }
             } catch (Exception ex) {
                 result = 0;
+                resultDouble = 0.0;
             }
 
             if (!entry.isStore) {
-                entry.value = result;
+                if (useDouble) {
+                    entry.valueDouble = resultDouble;
+                    entry.value = (int)resultDouble;  // For display compatibility
+                } else {
+                    entry.value = result;
+                    entry.valueDouble = result;
+                }
                 entry.ready = true;
             }
 
@@ -237,11 +299,11 @@ public class TomasuloSimulator {
             for (ReservationStation other : all) {
                 if (!other.busy) continue;
                 if (tag.equals(other.Qj)) {
-                    other.Vj = Integer.toString(result);
+                    other.Vj = useDouble ? Double.toString(resultDouble) : Integer.toString(result);
                     other.Qj = null;
                 }
                 if (tag.equals(other.Qk)) {
-                    other.Vk = Integer.toString(result);
+                    other.Vk = useDouble ? Double.toString(resultDouble) : Integer.toString(result);
                     other.Qk = null;
                 }
             }
@@ -261,7 +323,7 @@ public class TomasuloSimulator {
         System.out.println("Commit ROB" + head.id + " dest=" + head.dest + " ready=" + head.ready);
 
         if (head.isStore) {
-            memory.storeWord(head.storeAddress, head.storeValue);
+            cache.storeWord(head.storeAddress, head.storeValue);
             rob.popIfReady();
             return;
         }
@@ -269,7 +331,12 @@ public class TomasuloSimulator {
         if (head.dest != null && !head.dest.equals("MEM")) {
             RegisterFile.Register reg = registers.get(head.dest);
             if (reg != null && ("ROB" + head.id).equals(reg.tag)) {
-                reg.value = head.value;
+                // Enforce type: F registers get double, R registers get int
+                if (head.dest.startsWith("F")) {
+                    reg.value = head.valueDouble;
+                } else if (head.dest.startsWith("R")) {
+                    reg.value = (int)head.valueDouble;  // Truncate to integer for R registers
+                }
                 reg.tag = null;
             }
         }
@@ -329,8 +396,18 @@ public class TomasuloSimulator {
             if (toVj) { rs.Qj = r.tag; rs.Vj = null; }
             else { rs.Qk = r.tag; rs.Vk = null; }
         } else {
-            if (toVj) { rs.Vj = Integer.toString(r.value); rs.Qj = null; }
-            else { rs.Vk = Integer.toString(r.value); rs.Qk = null; }
+            // Format based on register type
+            String valueStr;
+            if (regName.startsWith("R")) {
+                // Integer register - convert to int
+                valueStr = Integer.toString((int)r.value);
+            } else {
+                // Floating point register - keep as double
+                valueStr = Double.toString(r.value);
+            }
+            
+            if (toVj) { rs.Vj = valueStr; rs.Qj = null; }
+            else { rs.Vk = valueStr; rs.Qk = null; }
         }
     }
 
@@ -351,13 +428,11 @@ public class TomasuloSimulator {
 
     private int latencyForOp(String op) {
         if (op == null) return 1;
-        if (op.startsWith("MUL")) return 10;
-        if (op.startsWith("DIV")) return 40;
-        if (op.startsWith("ADD") || op.startsWith("SUB") || 
-            op.equals("DADDI") || op.equals("DSUBI")) return 2;
-        if (op.startsWith("L")) return 3;
-        if (op.startsWith("S")) return 2;
-        if (op.startsWith("B")) return 1;
+        if (op.startsWith("MUL")) return config.mulLatency;
+        if (op.startsWith("DIV")) return config.divLatency;
+        if (op.startsWith("ADD") || op.startsWith("SUB")) return config.addSubLatency;
+        if (op.equals("DADDI") || op.equals("DSUBI")) return config.intAluLatency;
+        if (op.startsWith("B")) return config.branchLatency;
         return 1;
     }
 }
