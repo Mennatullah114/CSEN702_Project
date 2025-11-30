@@ -27,7 +27,7 @@ public class TomasuloSimulator {
     }
     
     private CacheMissListener cacheMissListener;
-    private AddressClashListener addressClashListener ;
+    private AddressClashListener addressClashListener;
     public TomasuloSimulator(SimulatorConfig config) {
         this.config = config;
         registers = new RegisterFile();
@@ -157,6 +157,7 @@ public class TomasuloSimulator {
                                   Integer.parseInt(rs.Vk == null ? "0" : rs.Vk);
                     if (hasAddressClash(rs, loadAddr)) {
                         System.out.println(rs.name + " stalled due to address clash at " + loadAddr);
+                        addressClashListener.onAddressClash(rs.name, loadAddr, " stalled due to address clash at " + loadAddr + "" );
                         continue;  // Stall this load
                     }
                 }
@@ -169,6 +170,7 @@ public class TomasuloSimulator {
                                    (rs.effectiveAddress != null ? rs.effectiveAddress : 0);
                     if (hasAddressClash(rs, storeAddr)) {
                         System.out.println(rs.name + " stalled due to address clash at " + storeAddr);
+                        addressClashListener.onAddressClash(rs.name, storeAddr, " stalled due to address clash at " + storeAddr + "" );
                         continue;  // Stall this store
                     }
                 }
