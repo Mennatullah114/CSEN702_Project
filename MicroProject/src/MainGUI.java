@@ -18,13 +18,16 @@ public class MainGUI extends Application {
     private ObservableList<GuiModels.RSRow> rsData = FXCollections.observableArrayList();
     private ObservableList<GuiModels.RSRow> addSubData = FXCollections.observableArrayList();
     private ObservableList<GuiModels.RSRow> mulDivData = FXCollections.observableArrayList();
-    private ObservableList<GuiModels.RSRow> loadStoreData = FXCollections.observableArrayList();
+    private ObservableList<GuiModels.RSRow> loadData = FXCollections.observableArrayList();
+    private ObservableList<GuiModels.RSRow> storeData = FXCollections.observableArrayList();
     private ObservableList<GuiModels.ROBRow> robData = FXCollections.observableArrayList();
     private ObservableList<GuiModels.RegRow> regData = FXCollections.observableArrayList();
     
     private Stage primaryStage;
     private TextArea programInput;
     private TextArea cacheDisplay;
+    private Label cycleLabel;
+    private Label pcLabel;
 
     @Override
     public void start(Stage stage) {
@@ -99,17 +102,30 @@ public class MainGUI extends Application {
         // Initialize data BEFORE creating tables
         initTables();
         
+        // Cycle and PC display at top
+        HBox statusBox = new HBox(30);
+        statusBox.setPadding(new Insets(10));
+        statusBox.setStyle("-fx-background-color: #e9ecef; -fx-border-color: #dee2e6; -fx-border-width: 1;");
+        
+        cycleLabel = new Label("Clock Cycle: 0");
+        cycleLabel.setStyle("-fx-font-size: 16px; -fx-font-weight: bold;");
+        
+        pcLabel = new Label("PC: 0");
+        pcLabel.setStyle("-fx-font-size: 16px; -fx-font-weight: bold;");
+        
+        statusBox.getChildren().addAll(cycleLabel, pcLabel);
+        
         Label lblAddSub = new Label("FP ADD / SUB Stations");
         Label lblMulDiv = new Label("FP MUL / DIV Stations");
-        Label lblLoadStore = new Label("Load / Store Buffers");
-        Label lblROB = new Label("Reorder Buffer");
+        Label lblLoad = new Label("Load Buffers");
+        Label lblStore = new Label("Store Buffers");
         Label lblRegs = new Label("Register File");
         Label lblCache = new Label("Cache Status");
 
         TableView<GuiModels.RSRow> addSubTable = createRSTable(addSubData);
         TableView<GuiModels.RSRow> mulDivTable = createRSTable(mulDivData);
-        TableView<GuiModels.RSRow> loadStoreTable = createRSTable(loadStoreData);
-        TableView<GuiModels.ROBRow> robTable = createROBTable();
+        TableView<GuiModels.RSRow> loadTable = createRSTable(loadData);
+        TableView<GuiModels.RSRow> storeTable = createRSTable(storeData);
         TableView<GuiModels.RegRow> regTable = createRegisterTable();
         
         programInput = new TextArea();
@@ -166,16 +182,17 @@ public class MainGUI extends Application {
 
         VBox root = new VBox(
             10,
+            statusBox,
             programInput,
             buttonBox,
             lblAddSub,
             addSubTable,
             lblMulDiv,
             mulDivTable,
-            lblLoadStore,
-            loadStoreTable,
-            lblROB,
-            robTable,
+            lblLoad,
+            loadTable,
+            lblStore,
+            storeTable,
             lblRegs,
             regTable,
             lblCache,
@@ -205,7 +222,8 @@ public class MainGUI extends Application {
         rsData.clear();
         addSubData.clear();
         mulDivData.clear();
-        loadStoreData.clear();
+        loadData.clear();
+        storeData.clear();
         regData.clear();
         
         // RS – create a row for each station and separate by type
@@ -223,13 +241,13 @@ public class MainGUI extends Application {
         
         for (ReservationStation rs : sim.loadBuffers) {
             GuiModels.RSRow row = new GuiModels.RSRow(rs);
-            loadStoreData.add(row);
+            loadData.add(row);
             rsData.add(row);
         }
         
-        for (ReservationStation rs : sim.intStations) {
+        for (ReservationStation rs : sim.storeBuffers) {
             GuiModels.RSRow row = new GuiModels.RSRow(rs);
-            loadStoreData.add(row);
+            storeData.add(row);
             rsData.add(row);
         }
 
@@ -244,7 +262,8 @@ public class MainGUI extends Application {
         rsData.clear();
         addSubData.clear();
         mulDivData.clear();
-        loadStoreData.clear();
+        loadData.clear();
+        storeData.clear();
         
         for (ReservationStation rs : sim.fpAddStations) {
             GuiModels.RSRow row = new GuiModels.RSRow(rs);
@@ -260,13 +279,13 @@ public class MainGUI extends Application {
         
         for (ReservationStation rs : sim.loadBuffers) {
             GuiModels.RSRow row = new GuiModels.RSRow(rs);
-            loadStoreData.add(row);
+            loadData.add(row);
             rsData.add(row);
         }
         
-        for (ReservationStation rs : sim.intStations) {
+        for (ReservationStation rs : sim.storeBuffers) {
             GuiModels.RSRow row = new GuiModels.RSRow(rs);
-            loadStoreData.add(row);
+            storeData.add(row);
             rsData.add(row);
         }
     }
@@ -274,6 +293,10 @@ public class MainGUI extends Application {
 
     /** UPDATE TABLES EACH CYCLE **/
     private void refreshTables() {
+        // Update cycle and PC
+        cycleLabel.setText("Clock Cycle: " + sim.clockCycle);
+        pcLabel.setText("PC: " + sim.pc);
+        
         // RS update
         for (GuiModels.RSRow row : rsData) {
             ReservationStation rs = row.rs;
@@ -286,16 +309,8 @@ public class MainGUI extends Application {
             row.latencyProperty().set(Integer.toString(rs.latencyRemaining));
         }
 
-        // ROB update
+        // ROB update - REMOVED
         robData.clear();
-        int idx = 0;
-        for (ReorderBuffer.ROBEntry e : sim.rob.queue) {
-            GuiModels.ROBRow r = new GuiModels.ROBRow(idx++);
-            r.destProperty().set(e.dest == null ? "-" : e.dest);
-            r.valueProperty().set("" + e.value);
-            r.readyProperty().set(e.ready ? "Yes" : "No");
-            robData.add(r);
-        }
 
         // Register file update
         for (GuiModels.RegRow r : regData) {

@@ -5,12 +5,14 @@ public class ReservationStation {
     // operation and operand fields (strings so GUI shows text)
     public String op;         // e.g. "ADD.D"
     public String Vj, Vk;     // operand values as strings
-    public String Qj, Qk;     // tags like "ROB0"
+    public String Qj, Qk;     // tags like "Add0", "Load1"
     public int latencyRemaining;
 
     // bookkeeping
-    public int robIndex = -1;
+    public String dest;        // destination register
     public Integer effectiveAddress = null;
+    public double result = 0.0;  // computed result
+    public boolean ready = false;  // ready to commit
 
     // flag to ensure we only write-back after execution started
     public boolean startedExecution = false;
@@ -28,8 +30,10 @@ public class ReservationStation {
         Qj = null;
         Qk = null;
         latencyRemaining = 0;
-        robIndex = -1;
+        dest = null;
         effectiveAddress = null;
         startedExecution = false;
+        result = 0.0;
+        ready = false;
     }
 }

@@ -3,7 +3,7 @@ import java.util.*;
 public class TomasuloSimulator {
 
     public RegisterFile registers;
-    public ReorderBuffer rob;
+  
     public Cache cache;
     public Memory memory;
     public SimulatorConfig config;
@@ -11,9 +11,12 @@ public class TomasuloSimulator {
     public List<ReservationStation> fpAddStations;
     public List<ReservationStation> fpMulStations;
     public List<ReservationStation> loadBuffers;
-    public List<ReservationStation> intStations;
+    public List<ReservationStation> storeBuffers;  // Separated from loads
 
     public List<Instruction> instructionQueue = new ArrayList<>();
+    
+    public int clockCycle = 0;
+    public int pc = 0;  // Program counter
     
     // Track pending cache operations
     private Map<ReservationStation, Integer> cachePendingCycles = new HashMap<>();
@@ -22,23 +25,25 @@ public class TomasuloSimulator {
     public interface CacheMissListener {
         void onCacheMiss(int address);
     }
-    public interface AddressClashListener{
-    	void onAddressClash(String stationName, int address, String reason);
-    }
-    
     private CacheMissListener cacheMissListener;
+    
+    // Address clash notification callback
+    public interface AddressClashListener {
+        void onAddressClash(String stationName, int address, String reason);
+    }
     private AddressClashListener addressClashListener;
+
     public TomasuloSimulator(SimulatorConfig config) {
         this.config = config;
         registers = new RegisterFile();
-        rob = new ReorderBuffer();
+      
         memory = new Memory();
         cache = new Cache(config.cacheSize, config.blockSize, memory);
 
         fpAddStations = new ArrayList<>();
         fpMulStations = new ArrayList<>();
         loadBuffers = new ArrayList<>();
-        intStations = new ArrayList<>();
+        storeBuffers = new ArrayList<>();
 
         // Create stations based on config
         for (int i = 0; i < config.fpAddStations; i++) 
@@ -48,21 +53,26 @@ public class TomasuloSimulator {
         for (int i = 0; i < config.loadBuffers; i++) 
             loadBuffers.add(new ReservationStation("Load" + i));
         for (int i = 0; i < config.intStations; i++) 
-            intStations.add(new ReservationStation("Int" + i));
+            storeBuffers.add(new ReservationStation("Store" + i));
     }
 
     public void loadProgram(List<Instruction> instructions) {
         instructionQueue.clear();
         instructionQueue.addAll(instructions);
+        clockCycle = 0;
+        pc = 0;
     }
     
     public void setCacheMissListener(CacheMissListener listener) {
         this.cacheMissListener = listener;
     }
-    public void setAddressClashListener (AddressClashListener listener){
-    	this.addressClashListener = listener ;
+    
+    public void setAddressClashListener(AddressClashListener listener) {
+        this.addressClashListener = listener;
     }
+
     public void step() {
+        clockCycle++;
         commit();
         writeBack();
         execute();
@@ -81,13 +91,10 @@ public class TomasuloSimulator {
             return;
         }
 
-        boolean isStore = isStore(inst.op);
-        String dest = inst.dest;
-        int robIndex = rob.add(dest == null ? "MEM" : dest, isStore);
-
+        // No ROB - use RS name as tag
         rs.busy = true;
         rs.op = inst.op.toString();
-        rs.robIndex = robIndex;
+        rs.dest = inst.dest;  // Store destination register
 
         switch (inst.op) {
             case ADD_D: case ADD_S:
@@ -125,15 +132,17 @@ public class TomasuloSimulator {
                 break;
         }
 
-        if (!isStore && inst.dest != null) {
+        // Mark destination register as waiting on this RS (not ROB)
+        if (!isStore(inst.op) && inst.dest != null) {
             RegisterFile.Register reg = registers.get(inst.dest);
             if (reg != null) {
-                reg.tag = "ROB" + robIndex;
+                reg.tag = rs.name;  // Use RS name instead of ROB tag
             }
         }
 
-        System.out.println("Issued to " + rs.name + " op=" + rs.op + " rob=ROB" + robIndex);
+        System.out.println("Issued to " + rs.name + " op=" + rs.op);
         instructionQueue.remove(0);
+        pc += 4;  // Increment PC
     }
 
     // -------------------------
@@ -156,8 +165,11 @@ public class TomasuloSimulator {
                     int loadAddr = Integer.parseInt(rs.Vj == null ? "0" : rs.Vj) + 
                                   Integer.parseInt(rs.Vk == null ? "0" : rs.Vk);
                     if (hasAddressClash(rs, loadAddr)) {
+                        String reason = "Earlier store to same address not yet completed";
                         System.out.println(rs.name + " stalled due to address clash at " + loadAddr);
-                        addressClashListener.onAddressClash(rs.name, loadAddr, " stalled due to address clash at " + loadAddr + "" );
+                        if (addressClashListener != null) {
+                            addressClashListener.onAddressClash(rs.name, loadAddr, reason);
+                        }
                         continue;  // Stall this load
                     }
                 }
@@ -169,8 +181,11 @@ public class TomasuloSimulator {
                     int storeAddr = Integer.parseInt(rs.Vk == null ? "0" : rs.Vk) + 
                                    (rs.effectiveAddress != null ? rs.effectiveAddress : 0);
                     if (hasAddressClash(rs, storeAddr)) {
+                        String reason = "Earlier memory operation to same address not yet completed";
                         System.out.println(rs.name + " stalled due to address clash at " + storeAddr);
-                        addressClashListener.onAddressClash(rs.name, storeAddr, " stalled due to address clash at " + storeAddr + "" );
+                        if (addressClashListener != null) {
+                            addressClashListener.onAddressClash(rs.name, storeAddr, reason);
+                        }
                         continue;  // Stall this store
                     }
                 }
@@ -256,42 +271,31 @@ public class TomasuloSimulator {
             finished.add(rs);
         }
 
-        // Handle multiple writebacks: prioritize older instructions (lower ROB index)
-        finished.sort(Comparator.comparingInt(rs -> rs.robIndex));
-
+        // Handle multiple writebacks: prioritize first in list
         for (ReservationStation rs : finished) {
-            int robId = rs.robIndex;
-            if (robId < 0 || robId >= rob.queue.size()) continue;
-            
-            ReorderBuffer.ROBEntry entry = rob.queue.get(robId);
-            System.out.println("WriteBack from " + rs.name + " op=" + rs.op + " rob=ROB" + robId);
+            System.out.println("WriteBack from " + rs.name + " op=" + rs.op);
 
-            int result = 0;
-            double resultDouble = 0.0;
-            boolean useDouble = false;
+            double result = 0.0;
+            boolean isStoreOp = isStoreOpString(rs.op);
             
             try {
                 switch (rs.op) {
                     case "ADD.D": case "ADD.S":
-                        resultDouble = Double.parseDouble(rs.Vj == null ? "0" : rs.Vj) + 
-                                      Double.parseDouble(rs.Vk == null ? "0" : rs.Vk);
-                        useDouble = true;
+                        result = Double.parseDouble(rs.Vj == null ? "0" : rs.Vj) + 
+                                Double.parseDouble(rs.Vk == null ? "0" : rs.Vk);
                         break;
                     case "SUB.D": case "SUB.S":
-                        resultDouble = Double.parseDouble(rs.Vj == null ? "0" : rs.Vj) - 
-                                      Double.parseDouble(rs.Vk == null ? "0" : rs.Vk);
-                        useDouble = true;
+                        result = Double.parseDouble(rs.Vj == null ? "0" : rs.Vj) - 
+                                Double.parseDouble(rs.Vk == null ? "0" : rs.Vk);
                         break;
                     case "MUL.D": case "MUL.S":
-                        resultDouble = Double.parseDouble(rs.Vj == null ? "0" : rs.Vj) * 
-                                      Double.parseDouble(rs.Vk == null ? "0" : rs.Vk);
-                        useDouble = true;
+                        result = Double.parseDouble(rs.Vj == null ? "0" : rs.Vj) * 
+                                Double.parseDouble(rs.Vk == null ? "0" : rs.Vk);
                         break;
                     case "DIV.D": case "DIV.S":
                         double denom = Double.parseDouble(rs.Vk == null ? "1" : rs.Vk);
-                        resultDouble = denom == 0 ? 0 : 
-                                      Double.parseDouble(rs.Vj == null ? "0" : rs.Vj) / denom;
-                        useDouble = true;
+                        result = denom == 0 ? 0 : 
+                                Double.parseDouble(rs.Vj == null ? "0" : rs.Vj) / denom;
                         break;
                     case "DADDI":
                         result = (int)Double.parseDouble(rs.Vj == null ? "0" : rs.Vj) + 
@@ -305,11 +309,9 @@ public class TomasuloSimulator {
                         result = cache.loadWord(rs.effectiveAddress);
                         break;
                     case "SW": case "SD": case "S.S": case "S.D":
-                        entry.isStore = true;
-                        entry.storeAddress = (rs.effectiveAddress != null) ? rs.effectiveAddress : 0;
-                        entry.storeValue = (int)Double.parseDouble(rs.Vj == null ? "0" : rs.Vj);
-                        entry.ready = true;
-                        result = entry.storeValue;
+                        // Store: write directly to cache/memory
+                        int storeValue = (int)Double.parseDouble(rs.Vj == null ? "0" : rs.Vj);
+                        cache.storeWord(rs.effectiveAddress, storeValue);
                         break;
                     case "BEQ":
                         result = (Double.parseDouble(rs.Vj == null ? "0" : rs.Vj) == 
@@ -324,67 +326,57 @@ public class TomasuloSimulator {
                 }
             } catch (Exception ex) {
                 result = 0;
-                resultDouble = 0.0;
             }
 
-            if (!entry.isStore) {
-                if (useDouble) {
-                    entry.valueDouble = resultDouble;
-                    entry.value = (int)resultDouble;  // For display compatibility
-                } else {
-                    entry.value = result;
-                    entry.valueDouble = result;
-                }
-                entry.ready = true;
-            }
-
-            String tag = "ROB" + robId;
+            // Broadcast result using RS name as tag
+            String tag = rs.name;
             for (ReservationStation other : all) {
                 if (!other.busy) continue;
                 if (tag.equals(other.Qj)) {
-                    other.Vj = useDouble ? Double.toString(resultDouble) : Integer.toString(result);
+                    other.Vj = Double.toString(result);
                     other.Qj = null;
                 }
                 if (tag.equals(other.Qk)) {
-                    other.Vk = useDouble ? Double.toString(resultDouble) : Integer.toString(result);
+                    other.Vk = Double.toString(result);
                     other.Qk = null;
                 }
             }
-
-            rs.clear();
+            
+            // Store result for commit
+            rs.result = result;
+            rs.ready = true;
         }
     }
 
     // -------------------------
-    // COMMIT
+    // COMMIT: Write results from ready RS to register file
     // -------------------------
     private void commit() {
-        ReorderBuffer.ROBEntry head = rob.peek();
-        if (head == null) return;
-        if (!head.ready) return;
-
-        System.out.println("Commit ROB" + head.id + " dest=" + head.dest + " ready=" + head.ready);
-
-        if (head.isStore) {
-            cache.storeWord(head.storeAddress, head.storeValue);
-            rob.popIfReady();
-            return;
-        }
-
-        if (head.dest != null && !head.dest.equals("MEM")) {
-            RegisterFile.Register reg = registers.get(head.dest);
-            if (reg != null && ("ROB" + head.id).equals(reg.tag)) {
-                // Enforce type: F registers get double, R registers get int
-                if (head.dest.startsWith("F")) {
-                    reg.value = head.valueDouble;
-                } else if (head.dest.startsWith("R")) {
-                    reg.value = (int)head.valueDouble;  // Truncate to integer for R registers
+        List<ReservationStation> all = getAllStations();
+        
+        for (ReservationStation rs : all) {
+            if (!rs.busy) continue;
+            if (!rs.ready) continue;
+            
+            System.out.println("Commit from " + rs.name + " dest=" + rs.dest);
+            
+            // Write to register file if register is still tagged with this RS
+            if (rs.dest != null && !rs.dest.isEmpty()) {
+                RegisterFile.Register reg = registers.get(rs.dest);
+                if (reg != null && rs.name.equals(reg.tag)) {
+                    // Enforce type: F registers get double, R registers get int
+                    if (rs.dest.startsWith("F")) {
+                        reg.value = rs.result;
+                    } else if (rs.dest.startsWith("R")) {
+                        reg.value = (int)rs.result;
+                    }
+                    reg.tag = null;
                 }
-                reg.tag = null;
             }
+            
+            // Clear the RS
+            rs.clear();
         }
-
-        rob.popIfReady();
     }
 
     // -------------------------
@@ -395,7 +387,7 @@ public class TomasuloSimulator {
         all.addAll(fpAddStations);
         all.addAll(fpMulStations);
         all.addAll(loadBuffers);
-        all.addAll(intStations);
+        all.addAll(storeBuffers);
         return all;
     }
 
@@ -411,9 +403,12 @@ public class TomasuloSimulator {
                 for (ReservationStation s : loadBuffers) if (!s.busy) return s;
                 break;
             case DADDI: case DSUBI:
-            case SW: case SD: case S_S: case S_D:
             case BEQ: case BNE:
-                for (ReservationStation s : intStations) if (!s.busy) return s;
+                // Integer operations can use any FP add station as ALU
+                for (ReservationStation s : fpAddStations) if (!s.busy) return s;
+                break;
+            case SW: case SD: case S_S: case S_D:
+                for (ReservationStation s : storeBuffers) if (!s.busy) return s;
                 break;
             default:
                 return null;
@@ -480,24 +475,20 @@ public class TomasuloSimulator {
     }
     
     // Check for address clashes between memory operations
+    // Without ROB, we check based on issue order (earlier issued = earlier in getAllStations list)
     private boolean hasAddressClash(ReservationStation current, int currentAddr) {
-        // Check all earlier instructions in ROB (those with lower ROB index)
-        for (int i = 0; i < current.robIndex; i++) {
-            if (i >= rob.queue.size()) break;
-            
-            ReorderBuffer.ROBEntry earlier = rob.queue.get(i);
-            if (!earlier.ready) {
-                // Find the RS for this earlier instruction
-                for (ReservationStation rs : getAllStations()) {
-                    if (rs.busy && rs.robIndex == i) {
-                        // Check if it's a memory operation with computed address
-                        if (isLoadOpString(rs.op) || isStoreOpString(rs.op)) {
-                            if (rs.effectiveAddress != null && rs.effectiveAddress == currentAddr) {
-                                // Address clash detected
-                                return true;
-                            }
-                        }
-                        break;
+        List<ReservationStation> all = getAllStations();
+        int currentIndex = all.indexOf(current);
+        
+        // Check all earlier issued instructions (those before current in the list that are still busy)
+        for (int i = 0; i < currentIndex; i++) {
+            ReservationStation earlier = all.get(i);
+            if (earlier.busy && !earlier.ready) {
+                // Check if it's a memory operation with computed address
+                if (isLoadOpString(earlier.op) || isStoreOpString(earlier.op)) {
+                    if (earlier.effectiveAddress != null && earlier.effectiveAddress == currentAddr) {
+                        // Address clash detected
+                        return true;
                     }
                 }
             }
