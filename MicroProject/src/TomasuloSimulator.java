@@ -315,20 +315,44 @@ public class TomasuloSimulator {
                         break;
                     case "BNE":
                         isBranch = true;
-                        if (Double.parseDouble(rs.Vj) != Double.parseDouble(rs.Vk)) {
-                            int targetPC = rs.pcAtIssue + 4 + (rs.branchOffset * 4);
-                            pc = targetPC;
-                            instructionQueue.clear();
-                            System.out.println("Branch taken to PC=" + targetPC);
+                        if (rs.Vj != null && rs.Vk != null) {
+                            if (Double.parseDouble(rs.Vj) != Double.parseDouble(rs.Vk)) {
+                                int targetPC = rs.pcAtIssue + 4 + (rs.branchOffset * 4);
+                                pc = targetPC;
+                                instructionQueue.clear();
+                                
+                                // Reload instructions from the target PC
+                                int instructionIndex = targetPC / 4;
+                                for (int i = instructionIndex; i < originalProgram.size(); i++) {
+                                    instructionQueue.add(originalProgram.get(i));
+                                }
+                                
+                                System.out.println("Branch taken to PC=" + targetPC + 
+                                                 ", reloaded " + instructionQueue.size() + " instructions");
+                            } else {
+                                System.out.println("Branch not taken (R1 == R2)");
+                            }
                         }
                         break;
                     case "BEQ":
                         isBranch = true;
-                        if (Double.parseDouble(rs.Vj) == Double.parseDouble(rs.Vk)) {
-                            int targetPC = rs.pcAtIssue + 4 + (rs.branchOffset * 4);
-                            pc = targetPC;
-                            instructionQueue.clear();
-                            System.out.println("Branch taken to PC=" + targetPC);
+                        if (rs.Vj != null && rs.Vk != null) {
+                            if (Double.parseDouble(rs.Vj) == Double.parseDouble(rs.Vk)) {
+                                int targetPC = rs.pcAtIssue + 4 + (rs.branchOffset * 4);
+                                pc = targetPC;
+                                instructionQueue.clear();
+                                
+                                // Reload instructions from the target PC
+                                int instructionIndex = targetPC / 4;
+                                for (int i = instructionIndex; i < originalProgram.size(); i++) {
+                                    instructionQueue.add(originalProgram.get(i));
+                                }
+                                
+                                System.out.println("Branch taken to PC=" + targetPC + 
+                                                 ", reloaded " + instructionQueue.size() + " instructions");
+                            } else {
+                                System.out.println("Branch not taken (R1 != R2)");
+                            }
                         }
                         break;
                     default:
