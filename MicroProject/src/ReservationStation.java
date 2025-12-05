@@ -8,11 +8,19 @@ public class ReservationStation {
     public String Qj, Qk;     // tags like "Add0", "Load1"
     public int latencyRemaining;
 
-    // bookkeeping
-    public String dest;        // destination register
+ // bookkeeping
+    public Integer robIndex = -1;
     public Integer effectiveAddress = null;
-    public double result = 0.0;  // computed result
-    public boolean ready = false;  // ready to commit
+    public String dest = null;        // destination register
+    public double result = 0.0;       // computed result
+    public boolean ready = false;     // ready to commit
+    
+    // For branches
+    public Integer pcAtIssue = null;
+    public Integer branchOffset = null;
+
+
+
 
     // flag to ensure we only write-back after execution started
     public boolean startedExecution = false;

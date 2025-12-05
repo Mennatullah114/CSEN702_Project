@@ -14,6 +14,8 @@ public class TomasuloSimulator {
     public List<ReservationStation> storeBuffers;  // Separated from loads
 
     public List<Instruction> instructionQueue = new ArrayList<>();
+    private List<Instruction> originalProgram = new ArrayList<>();
+
     
     public int clockCycle = 0;
     public int pc = 0;  // Program counter
@@ -57,6 +59,7 @@ public class TomasuloSimulator {
     }
 
     public void loadProgram(List<Instruction> instructions) {
+        originalProgram = new ArrayList<>(instructions);
         instructionQueue.clear();
         instructionQueue.addAll(instructions);
         clockCycle = 0;
@@ -126,6 +129,7 @@ public class TomasuloSimulator {
             case BEQ: case BNE:
                 bindSourceToRS(rs, inst.src1, true);
                 bindSourceToRS(rs, inst.src2, false);
+                rs.branchTarget = inst.immediate;  // store jump target here
                 break;
 
             default:
@@ -139,6 +143,8 @@ public class TomasuloSimulator {
                 reg.tag = rs.name;  // Use RS name instead of ROB tag
             }
         }
+        //for branching
+        rs.pcAtIssue = pc; 
 
         System.out.println("Issued to " + rs.name + " op=" + rs.op);
         instructionQueue.remove(0);
@@ -313,14 +319,26 @@ public class TomasuloSimulator {
                         int storeValue = (int)Double.parseDouble(rs.Vj == null ? "0" : rs.Vj);
                         cache.storeWord(rs.effectiveAddress, storeValue);
                         break;
-                    case "BEQ":
-                        result = (Double.parseDouble(rs.Vj == null ? "0" : rs.Vj) == 
-                                 Double.parseDouble(rs.Vk == null ? "0" : rs.Vk)) ? 1 : 0;
-                        break;
                     case "BNE":
-                        result = (Double.parseDouble(rs.Vj == null ? "0" : rs.Vj) != 
-                                 Double.parseDouble(rs.Vk == null ? "0" : rs.Vk)) ? 1 : 0;
+                        if (Double.parseDouble(rs.Vj) != Double.parseDouble(rs.Vk)) {
+                            // Calculate target: PC of branch + 4 + (offset * 4)
+                            int targetPC = rs.pcAtIssue + 4 + (rs.branchTarget * 4);
+                            pc = targetPC;
+                            // Clear instruction queue as we need to fetch from new location
+                            instructionQueue.clear();
+                            System.out.println("Branch taken to PC=" + targetPC);
+                        }
                         break;
+
+                    case "BEQ":
+                        if (Double.parseDouble(rs.Vj) == Double.parseDouble(rs.Vk)) {
+                            int targetPC = rs.pcAtIssue + 4 + (rs.branchTarget * 4);
+                            pc = targetPC;
+                            instructionQueue.clear();
+                            System.out.println("Branch taken to PC=" + targetPC);
+                        }
+                        break;
+
                     default:
                         result = 0;
                 }
@@ -345,6 +363,8 @@ public class TomasuloSimulator {
             // Store result for commit
             rs.result = result;
             rs.ready = true;
+        
+
         }
     }
 
@@ -495,4 +515,5 @@ public class TomasuloSimulator {
         }
         return false;
     }
+    
 }
