@@ -364,15 +364,27 @@ public class TomasuloSimulator {
 
             // Broadcast result using RS name as tag
             String tag = rs.name;
+            boolean isFP = rs.op.contains(".D") || rs.op.contains(".S");
+
             for (ReservationStation other : all) {
                 if (!other.busy) continue;
                 if (tag.equals(other.Qj)) {
-                    other.Vj = Double.toString(result);
+                	if (isFP) {
+                		other.Vj = Double.toString(result);
+                	}
+                	else{
+                		other.Vj = Integer.toString((int)result);
+                	}
                     other.Qj = null;
                 }
                 if (tag.equals(other.Qk)) {
-                    other.Vk = Double.toString(result);
-                    other.Qk = null;
+                	if (isFP) {
+                		other.Vk = Double.toString(result);
+                	}
+                	else{
+                		other.Vk = Integer.toString((int)result);
+                	}                    
+                	other.Qk = null;
                 }
             }
             
