@@ -3,7 +3,6 @@ import java.util.*;
 public class TomasuloSimulator {
 
     public RegisterFile registers;
-  
     public Cache cache;
     public Memory memory;
     public SimulatorConfig config;
@@ -11,14 +10,13 @@ public class TomasuloSimulator {
     public List<ReservationStation> fpAddStations;
     public List<ReservationStation> fpMulStations;
     public List<ReservationStation> loadBuffers;
-    public List<ReservationStation> storeBuffers;  // Separated from loads
+    public List<ReservationStation> storeBuffers;
 
     public List<Instruction> instructionQueue = new ArrayList<>();
     private List<Instruction> originalProgram = new ArrayList<>();
 
-    
     public int clockCycle = 0;
-    public int pc = 0;  // Program counter
+    public int pc = 0;
     
     // Track pending cache operations
     private Map<ReservationStation, Integer> cachePendingCycles = new HashMap<>();
@@ -38,7 +36,6 @@ public class TomasuloSimulator {
     public TomasuloSimulator(SimulatorConfig config) {
         this.config = config;
         registers = new RegisterFile();
-      
         memory = new Memory();
         cache = new Cache(config.cacheSize, config.blockSize, memory);
 
@@ -76,7 +73,6 @@ public class TomasuloSimulator {
 
     public void step() {
         clockCycle++;
-        commit();
         writeBack();
         execute();
         issue();
@@ -94,10 +90,10 @@ public class TomasuloSimulator {
             return;
         }
 
-        // No ROB - use RS name as tag
+        // Use RS name as tag
         rs.busy = true;
         rs.op = inst.op.toString();
-        rs.dest = inst.dest;  // Store destination register
+        rs.dest = inst.dest;
 
         switch (inst.op) {
             case ADD_D: case ADD_S:
@@ -129,26 +125,26 @@ public class TomasuloSimulator {
             case BEQ: case BNE:
                 bindSourceToRS(rs, inst.src1, true);
                 bindSourceToRS(rs, inst.src2, false);
-                rs.branchTarget = inst.immediate;  // store jump target here
+                rs.branchOffset = inst.immediate;
                 break;
 
             default:
                 break;
         }
 
-        // Mark destination register as waiting on this RS (not ROB)
+        // Mark destination register as waiting on this RS
         if (!isStore(inst.op) && inst.dest != null) {
             RegisterFile.Register reg = registers.get(inst.dest);
             if (reg != null) {
-                reg.tag = rs.name;  // Use RS name instead of ROB tag
+                reg.tag = rs.name;
             }
         }
-        //for branching
-        rs.pcAtIssue = pc; 
+        
+        rs.pcAtIssue = pc;
 
         System.out.println("Issued to " + rs.name + " op=" + rs.op);
         instructionQueue.remove(0);
-        pc += 4;  // Increment PC
+        pc += 4;
     }
 
     // -------------------------
@@ -166,7 +162,7 @@ public class TomasuloSimulator {
             if (rs.op != null && isLoadOpString(rs.op)) {
                 if (!readyJ) continue;
                 
-                // Address clash check for loads: ensure no earlier stores to same address
+                // Address clash check for loads
                 if (!rs.startedExecution && rs.Qj == null) {
                     int loadAddr = Integer.parseInt(rs.Vj == null ? "0" : rs.Vj) + 
                                   Integer.parseInt(rs.Vk == null ? "0" : rs.Vk);
@@ -176,13 +172,13 @@ public class TomasuloSimulator {
                         if (addressClashListener != null) {
                             addressClashListener.onAddressClash(rs.name, loadAddr, reason);
                         }
-                        continue;  // Stall this load
+                        continue;
                     }
                 }
             } else if (rs.op != null && isStoreOpString(rs.op)) {
                 if (!(readyJ && readyK)) continue;
                 
-                // Address clash check for stores: ensure no earlier loads/stores to same address
+                // Address clash check for stores
                 if (!rs.startedExecution) {
                     int storeAddr = Integer.parseInt(rs.Vk == null ? "0" : rs.Vk) + 
                                    (rs.effectiveAddress != null ? rs.effectiveAddress : 0);
@@ -192,7 +188,7 @@ public class TomasuloSimulator {
                         if (addressClashListener != null) {
                             addressClashListener.onAddressClash(rs.name, storeAddr, reason);
                         }
-                        continue;  // Stall this store
+                        continue;
                     }
                 }
             } else {
@@ -210,7 +206,7 @@ public class TomasuloSimulator {
                     } else {
                         // Cache operation complete
                         cachePendingCycles.remove(rs);
-                        rs.latencyRemaining = 0; // Ready for writeback
+                        rs.latencyRemaining = 0;
                     }
                 } else if (rs.latencyRemaining == 0 && !rs.startedExecution) {
                     // Start cache access
@@ -239,7 +235,6 @@ public class TomasuloSimulator {
                                      " - " + (hit ? "HIT" : "MISS") + 
                                      " (latency=" + latency + ")");
                     
-                    // Notify on cache miss
                     if (!hit && cacheMissListener != null) {
                         cacheMissListener.onCacheMiss(address);
                     }
@@ -263,7 +258,7 @@ public class TomasuloSimulator {
     }
 
     // -------------------------
-    // WRITE BACK
+    // WRITE BACK (includes commit logic)
     // -------------------------
     private void writeBack() {
         List<ReservationStation> all = getAllStations();
@@ -282,7 +277,7 @@ public class TomasuloSimulator {
             System.out.println("WriteBack from " + rs.name + " op=" + rs.op);
 
             double result = 0.0;
-            boolean isStoreOp = isStoreOpString(rs.op);
+            boolean isBranch = false;
             
             try {
                 switch (rs.op) {
@@ -315,30 +310,27 @@ public class TomasuloSimulator {
                         result = cache.loadWord(rs.effectiveAddress);
                         break;
                     case "SW": case "SD": case "S.S": case "S.D":
-                        // Store: write directly to cache/memory
                         int storeValue = (int)Double.parseDouble(rs.Vj == null ? "0" : rs.Vj);
                         cache.storeWord(rs.effectiveAddress, storeValue);
                         break;
                     case "BNE":
+                        isBranch = true;
                         if (Double.parseDouble(rs.Vj) != Double.parseDouble(rs.Vk)) {
-                            // Calculate target: PC of branch + 4 + (offset * 4)
-                            int targetPC = rs.pcAtIssue + 4 + (rs.branchTarget * 4);
+                            int targetPC = rs.pcAtIssue + 4 + (rs.branchOffset * 4);
                             pc = targetPC;
-                            // Clear instruction queue as we need to fetch from new location
                             instructionQueue.clear();
                             System.out.println("Branch taken to PC=" + targetPC);
                         }
                         break;
-
                     case "BEQ":
+                        isBranch = true;
                         if (Double.parseDouble(rs.Vj) == Double.parseDouble(rs.Vk)) {
-                            int targetPC = rs.pcAtIssue + 4 + (rs.branchTarget * 4);
+                            int targetPC = rs.pcAtIssue + 4 + (rs.branchOffset * 4);
                             pc = targetPC;
                             instructionQueue.clear();
                             System.out.println("Branch taken to PC=" + targetPC);
                         }
                         break;
-
                     default:
                         result = 0;
                 }
@@ -360,37 +352,18 @@ public class TomasuloSimulator {
                 }
             }
             
-            // Store result for commit
-            rs.result = result;
-            rs.ready = true;
-        
-
-        }
-    }
-
-    // -------------------------
-    // COMMIT: Write results from ready RS to register file
-    // -------------------------
-    private void commit() {
-        List<ReservationStation> all = getAllStations();
-        
-        for (ReservationStation rs : all) {
-            if (!rs.busy) continue;
-            if (!rs.ready) continue;
-            
-            System.out.println("Commit from " + rs.name + " dest=" + rs.dest);
-            
-            // Write to register file if register is still tagged with this RS
-            if (rs.dest != null && !rs.dest.isEmpty()) {
+            // Write result to register file immediately (no ROB, no speculation)
+            if (!isBranch && rs.dest != null && !rs.dest.isEmpty()) {
                 RegisterFile.Register reg = registers.get(rs.dest);
                 if (reg != null && rs.name.equals(reg.tag)) {
                     // Enforce type: F registers get double, R registers get int
                     if (rs.dest.startsWith("F")) {
-                        reg.value = rs.result;
+                        reg.value = result;
                     } else if (rs.dest.startsWith("R")) {
-                        reg.value = (int)rs.result;
+                        reg.value = (int)result;
                     }
                     reg.tag = null;
+                    System.out.println("Result written to " + rs.dest + " = " + reg.value);
                 }
             }
             
@@ -424,7 +397,6 @@ public class TomasuloSimulator {
                 break;
             case DADDI: case DSUBI:
             case BEQ: case BNE:
-                // Integer operations can use any FP add station as ALU
                 for (ReservationStation s : fpAddStations) if (!s.busy) return s;
                 break;
             case SW: case SD: case S_S: case S_D:
@@ -454,13 +426,10 @@ public class TomasuloSimulator {
             if (toVj) { rs.Qj = r.tag; rs.Vj = null; }
             else { rs.Qk = r.tag; rs.Vk = null; }
         } else {
-            // Format based on register type
             String valueStr;
             if (regName.startsWith("R")) {
-                // Integer register - convert to int
                 valueStr = Integer.toString((int)r.value);
             } else {
-                // Floating point register - keep as double
                 valueStr = Double.toString(r.value);
             }
             
@@ -494,20 +463,16 @@ public class TomasuloSimulator {
         return 1;
     }
     
-    // Check for address clashes between memory operations
-    // Without ROB, we check based on issue order (earlier issued = earlier in getAllStations list)
     private boolean hasAddressClash(ReservationStation current, int currentAddr) {
         List<ReservationStation> all = getAllStations();
         int currentIndex = all.indexOf(current);
         
-        // Check all earlier issued instructions (those before current in the list that are still busy)
+        // Check all earlier issued instructions
         for (int i = 0; i < currentIndex; i++) {
             ReservationStation earlier = all.get(i);
-            if (earlier.busy && !earlier.ready) {
-                // Check if it's a memory operation with computed address
+            if (earlier.busy) {
                 if (isLoadOpString(earlier.op) || isStoreOpString(earlier.op)) {
                     if (earlier.effectiveAddress != null && earlier.effectiveAddress == currentAddr) {
-                        // Address clash detected
                         return true;
                     }
                 }
@@ -515,5 +480,4 @@ public class TomasuloSimulator {
         }
         return false;
     }
-    
 }

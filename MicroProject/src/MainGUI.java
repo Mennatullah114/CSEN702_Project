@@ -20,7 +20,6 @@ public class MainGUI extends Application {
     private ObservableList<GuiModels.RSRow> mulDivData = FXCollections.observableArrayList();
     private ObservableList<GuiModels.RSRow> loadData = FXCollections.observableArrayList();
     private ObservableList<GuiModels.RSRow> storeData = FXCollections.observableArrayList();
-    private ObservableList<GuiModels.ROBRow> robData = FXCollections.observableArrayList();
     private ObservableList<GuiModels.RegRow> regData = FXCollections.observableArrayList();
     
     private Stage primaryStage;
@@ -86,7 +85,6 @@ public class MainGUI extends Application {
                 
                 reinitTables();
                 if (!currentProgram.isEmpty()) {
-                    // Reload program if there was one
                     List<Instruction> prog = InstructionParser.parse(currentProgram);
                     sim.loadProgram(prog);
                 }
@@ -226,7 +224,7 @@ public class MainGUI extends Application {
         storeData.clear();
         regData.clear();
         
-        // RS – create a row for each station and separate by type
+        // RS - create a row for each station and separate by type
         for (ReservationStation rs : sim.fpAddStations) {
             GuiModels.RSRow row = new GuiModels.RSRow(rs);
             addSubData.add(row);
@@ -308,9 +306,6 @@ public class MainGUI extends Application {
             row.QkProperty().set(rs.Qk == null ? "-" : rs.Qk);
             row.latencyProperty().set(Integer.toString(rs.latencyRemaining));
         }
-
-        // ROB update - REMOVED
-        robData.clear();
 
         // Register file update
         for (GuiModels.RegRow r : regData) {
@@ -425,20 +420,6 @@ public class MainGUI extends Application {
         table.getColumns().add(col("Latency", "latency", 80));
         
         table.setItems(data);
-
-        return table;
-    }
-
-    private TableView<GuiModels.ROBRow> createROBTable() {
-        TableView<GuiModels.ROBRow> table = new TableView<>();
-        table.setPrefHeight(120);
-
-        table.getColumns().add(col("Entry", "entry", 100));
-        table.getColumns().add(col("Dest", "dest", 100));
-        table.getColumns().add(col("Value", "value", 120));
-        table.getColumns().add(col("Ready", "ready", 80));
-        
-        table.setItems(robData);
 
         return table;
     }
